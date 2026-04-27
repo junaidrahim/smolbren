@@ -1,0 +1,239 @@
+"""Typer entry point. Subcommands live in their own modules; this file wires."""
+
+from __future__ import annotations
+
+import json
+import logging
+import signal
+import sys
+import time
+from pathlib import Path
+from types import FrameType
+
+import structlog
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from . import config as config_mod
+from .errors import ConfigError, SmolbrenError
+from .index import connect
+from .index import stats as index_stats
+from .ingest import ingest_vault, watch_vault
+
+app = typer.Typer(
+    name="smolbren",
+    help="Local-first second-brain CLI for Obsidian vaults.",
+    no_args_is_help=True,
+    add_completion=False,
+)
+
+console = Console()
+err_console = Console(stderr=True)
+
+
+def _configure_logging(json_mode: bool) -> None:
+    level = logging.INFO
+    if json_mode:
+        structlog.configure(
+            processors=[
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.add_log_level,
+                structlog.processors.JSONRenderer(),
+            ],
+            wrapper_class=structlog.make_filtering_bound_logger(level),
+        )
+    else:
+        structlog.configure(
+            processors=[
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty()),
+            ],
+            wrapper_class=structlog.make_filtering_bound_logger(level),
+        )
+    logging.basicConfig(level=level, format="%(message)s")
+
+
+VaultOption = typer.Option(
+    None,
+    "--vault",
+    help="Vault root directory. Defaults to $SMOLBREN_VAULT, then the current directory.",
+)
+JsonOption = typer.Option(False, "--json", help="Emit machine-readable JSON output.")
+
+
+def _emit_json(data: object) -> None:
+    console.print_json(json.dumps(data, default=str))
+
+
+def _die(msg: str, code: int = 1) -> None:
+    err_console.print(f"[red]error:[/red] {msg}")
+    raise typer.Exit(code=code)
+
+
+@app.command("init")
+def init_cmd(
+    vault: Path | None = VaultOption,
+    json_out: bool = JsonOption,
+) -> None:
+    """Scaffold .smolbren/ in the vault and write the default config."""
+    _configure_logging(json_out)
+    vault_path = config_mod.resolve_vault(vault)
+    if not vault_path.is_dir():
+        _die(f"Vault path is not a directory: {vault_path}")
+    try:
+        config_path = config_mod.write_default_config(vault_path)
+    except ConfigError as e:
+        _die(str(e))
+    cfg = config_mod.load_config(vault_path)
+    conn = connect(cfg.db_path)
+    conn.close()
+    if json_out:
+        _emit_json(
+            {
+                "vault": str(vault_path),
+                "config": str(config_path),
+                "db": str(cfg.db_path),
+            }
+        )
+    else:
+        console.print(f"[green]initialized[/green] vault at {vault_path}")
+        console.print(f"  config: {config_path}")
+        console.print(f"  db:     {cfg.db_path}")
+
+
+def _load_or_die(vault_path: Path) -> config_mod.Config:
+    try:
+        return config_mod.load_config(vault_path)
+    except ConfigError as e:
+        _die(str(e))
+        raise  # for type checker; _die raises
+
+
+@app.command("ingest")
+def ingest_cmd(
+    vault: Path | None = VaultOption,
+    watch: bool = typer.Option(False, "--watch", help="Watch the vault and re-ingest on change."),
+    debounce_ms: int = typer.Option(
+        500, "--debounce-ms", help="Per-file debounce window in --watch mode."
+    ),
+    json_out: bool = JsonOption,
+) -> None:
+    """Ingest the vault: parse → chunk → upsert. With --watch, stays running."""
+    _configure_logging(json_out)
+    vault_path = config_mod.resolve_vault(vault)
+    cfg = _load_or_die(vault_path)
+    conn = connect(cfg.db_path)
+    try:
+        result = ingest_vault(conn, cfg)
+        if json_out:
+            _emit_json(
+                {
+                    "processed": result.processed,
+                    "upserted": result.upserted,
+                    "skipped_unchanged": result.skipped_unchanged,
+                    "deleted": result.deleted,
+                    "chunks_written": result.chunks_written,
+                    "duration_s": round(result.duration_s, 4),
+                }
+            )
+        else:
+            console.print(
+                f"[green]ingest[/green] processed={result.processed} "
+                f"upserted={result.upserted} skipped={result.skipped_unchanged} "
+                f"deleted={result.deleted} chunks={result.chunks_written} "
+                f"in {result.duration_s:.2f}s"
+            )
+
+        if not watch:
+            return
+
+        if not json_out:
+            console.print(f"[cyan]watching[/cyan] {vault_path} (debounce={debounce_ms}ms)…")
+
+        def on_event(path: Path, deleted: bool, was_upserted: bool, chunks: int) -> None:
+            if json_out:
+                _emit_json(
+                    {
+                        "event": "delete" if deleted else "upsert",
+                        "path": str(path),
+                        "was_upserted": was_upserted,
+                        "chunks": chunks,
+                    }
+                )
+            else:
+                kind = "deleted" if deleted else ("upserted" if was_upserted else "unchanged")
+                console.print(f"  [{kind}] {path} ({chunks} chunks)")
+
+        observer = watch_vault(conn, cfg, debounce_s=debounce_ms / 1000.0, on_event=on_event)
+
+        stop = False
+
+        def handle_signal(signum: int, frame: FrameType | None) -> None:
+            nonlocal stop
+            stop = True
+
+        signal.signal(signal.SIGINT, handle_signal)
+        signal.signal(signal.SIGTERM, handle_signal)
+
+        try:
+            while not stop:
+                time.sleep(0.2)
+        finally:
+            observer.stop()
+            observer.join(timeout=5.0)
+    finally:
+        conn.close()
+
+
+@app.command("stats")
+def stats_cmd(
+    vault: Path | None = VaultOption,
+    json_out: bool = JsonOption,
+) -> None:
+    """Print page / chunk / edge counts and type distribution."""
+    _configure_logging(json_out)
+    vault_path = config_mod.resolve_vault(vault)
+    cfg = _load_or_die(vault_path)
+    conn = connect(cfg.db_path)
+    try:
+        s = index_stats(conn)
+    finally:
+        conn.close()
+    if json_out:
+        _emit_json(
+            {"pages": s.pages, "chunks": s.chunks, "edges": s.edges, "types": s.types}
+        )
+        return
+
+    table = Table(title=f"smolbren stats — {vault_path}")
+    table.add_column("metric", style="cyan")
+    table.add_column("value", justify="right")
+    table.add_row("pages", str(s.pages))
+    table.add_row("chunks", str(s.chunks))
+    table.add_row("edges", str(s.edges))
+    console.print(table)
+
+    if s.types:
+        type_table = Table(title="page types")
+        type_table.add_column("type", style="magenta")
+        type_table.add_column("count", justify="right")
+        for t, n in s.types.items():
+            type_table.add_row(t, str(n))
+        console.print(type_table)
+        if "<untyped>" in s.types:
+            console.print(
+                f"[yellow]warning:[/yellow] {s.types['<untyped>']} page(s) lack a "
+                "frontmatter `type:` — these will be skipped by ontology validation."
+            )
+
+
+def main() -> None:
+    try:
+        app()
+    except SmolbrenError as e:
+        _die(str(e))
+
+
+if __name__ == "__main__":
+    main()

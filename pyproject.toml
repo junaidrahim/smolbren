@@ -1,0 +1,75 @@
+[project]
+name = "smolbren"
+version = "0.1.0"
+description = "Local-first second-brain CLI for Obsidian vaults: hybrid search, typed knowledge graph, MCP server."
+readme = "README.md"
+authors = [
+    { email = "junaidrahim8d@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.27.0",
+    "mistune>=3.2.0",
+    "networkx>=3.6.1",
+    "ollama>=0.6.1",
+    "pydantic-settings>=2.14.0",
+    "python-frontmatter>=1.1.0",
+    "rich>=15.0.0",
+    "sqlite-vec>=0.1.9",
+    "structlog>=25.5.0",
+    "typer>=0.25.0",
+    "watchdog>=6.0.0",
+]
+
+[project.scripts]
+smolbren = "smolbren.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.10.12,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.2",
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.12",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/smolbren", "tests"]
+
+[[tool.mypy.overrides]]
+module = [
+    "frontmatter",
+    "mistune",
+    "sqlite_vec",
+    "watchdog.*",
+    "networkx",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["src/smolbren"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
