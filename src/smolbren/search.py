@@ -10,6 +10,7 @@ Public surface:
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 from collections import defaultdict
@@ -228,10 +229,14 @@ def hybrid_search(
     embedder: Embedder | None = None,
     overfetch: int = 3,
 ) -> list[SearchHit]:
-    """Run vector + keyword search and fuse with RRF.
+    """Run vector + keyword search and fuse with RRF, then apply backlink boost.
 
-    Each branch is asked for `top_k * overfetch` candidates so RRF has
-    enough overlap to do useful fusion before we trim back to top_k.
+    Each branch is asked for `top_k * overfetch` candidates so RRF has enough
+    overlap to do useful fusion. After fusion, we multiply each fused score
+    by `1 + backlink_boost · log(1 + backlinks)` — popular pages float up
+    when scores are otherwise close. Boost reads `config.search.backlink_boost`
+    (set to 0 to disable). Top_k slice happens AFTER the boost so a popular
+    page can knock a less-cited but slightly-higher-RRF page off the list.
     """
     if top_k <= 0:
         raise SearchError("top_k must be > 0")
@@ -256,10 +261,8 @@ def hybrid_search(
     )
     if not fused:
         return []
-    fused = fused[:top_k]
 
-    # Hydrate from whichever branch already loaded the chunk; fetch any
-    # missing ones in one shot.
+    # Hydrate hits before we apply backlink boost (we need slugs).
     by_id: dict[int, SearchHit] = {h.chunk_id: h for h in vec_hits}
     for h in kw_hits:
         by_id.setdefault(h.chunk_id, h)
@@ -272,13 +275,30 @@ def hybrid_search(
                 continue
             by_id[cid] = _hit_from_context(c, score=0.0)
 
+    boost_coef = config.search.backlink_boost
+    if boost_coef > 0.0:
+        # Local import to avoid a circular dep (graph imports nothing search-y,
+        # but the rule "search → graph for ranking only" stays one-way).
+        from .graph import backlink_counts
+
+        slugs = sorted({by_id[cid].slug for cid, _ in fused if cid in by_id})
+        bl = backlink_counts(conn, slugs)
+        boosted: list[tuple[int, float]] = []
+        for cid, score in fused:
+            base = by_id.get(cid)
+            if base is None:  # pragma: no cover
+                continue
+            multiplier = 1.0 + boost_coef * math.log1p(bl.get(base.slug, 0))
+            boosted.append((cid, score * multiplier))
+        fused = sorted(boosted, key=lambda kv: -kv[1])
+
+    fused = fused[:top_k]
+
     out: list[SearchHit] = []
     for cid, fused_score in fused:
         base = by_id.get(cid)
         if base is None:  # pragma: no cover
             continue
-        # Replace the per-branch score with the RRF fused score so the
-        # ranking on display matches the fused order.
         out.append(
             SearchHit(
                 chunk_id=base.chunk_id,

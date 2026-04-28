@@ -127,6 +127,15 @@ MIGRATIONS: list[str] = [
     INSERT INTO fts_chunks(rowid, text, heading)
       SELECT id, text, heading FROM chunks;
     """,
+    # 5: graph version counter. Single-row table that gets bumped on every
+    #    edge write, so the graph cache can detect staleness across processes.
+    """
+    CREATE TABLE IF NOT EXISTS graph_state (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version INTEGER NOT NULL DEFAULT 0
+    );
+    INSERT OR IGNORE INTO graph_state (id, version) VALUES (1, 0);
+    """,
 ]
 
 
@@ -293,7 +302,9 @@ def delete_page_by_slug(conn: sqlite3.Connection, slug: str) -> bool:
     deleted = cur.fetchone() is not None
     if deleted:
         _delete_vec_rows(conn, chunk_ids)
-        conn.execute("DELETE FROM links WHERE source_page = ?", (slug,))
+        link_cur = conn.execute("DELETE FROM links WHERE source_page = ?", (slug,))
+        if link_cur.rowcount > 0:
+            bump_graph_version(conn)
     return deleted
 
 
@@ -345,22 +356,40 @@ def replace_edges_for_source(
     is delete-then-insert keyed on `source_page` — atomic and simpler than
     diffing.
     """
-    conn.execute("DELETE FROM links WHERE source_page = ?", (source_slug,))
-    if not edges:
-        return
-    now = time.time()
-    conn.executemany(
-        """
-        INSERT OR IGNORE INTO links
-            (src_slug, dst_slug, type, source_page, confidence, extracted_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        """,
-        [(src, dst, t, source_slug, conf, now) for (src, dst, t, conf) in edges],
-    )
+    cur = conn.execute("DELETE FROM links WHERE source_page = ?", (source_slug,))
+    deleted_any = cur.rowcount > 0
+    inserted_any = False
+    if edges:
+        now = time.time()
+        conn.executemany(
+            """
+            INSERT OR IGNORE INTO links
+                (src_slug, dst_slug, type, source_page, confidence, extracted_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [(src, dst, t, source_slug, conf, now) for (src, dst, t, conf) in edges],
+        )
+        inserted_any = True
+    if deleted_any or inserted_any:
+        bump_graph_version(conn)
 
 
 def delete_edges_for_source(conn: sqlite3.Connection, source_slug: str) -> None:
-    conn.execute("DELETE FROM links WHERE source_page = ?", (source_slug,))
+    cur = conn.execute("DELETE FROM links WHERE source_page = ?", (source_slug,))
+    if cur.rowcount > 0:
+        bump_graph_version(conn)
+
+
+def bump_graph_version(conn: sqlite3.Connection) -> None:
+    """Mark the graph cache as stale. Idempotent and cheap."""
+    conn.execute("UPDATE graph_state SET version = version + 1 WHERE id = 1")
+
+
+def get_graph_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT version FROM graph_state WHERE id = 1").fetchone()
+    if row is None:  # pragma: no cover (migration 5 ensures the row)
+        return 0
+    return int(row[0])
 
 
 # --- chunks for embedding/search ------------------------------------------

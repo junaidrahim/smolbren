@@ -18,7 +18,17 @@ from rich.table import Table
 
 from . import config as config_mod
 from .embed import embed_pending
-from .errors import ConfigError, EmbedError, SearchError, SmolbrenError
+from .errors import ConfigError, EmbedError, GraphError, SearchError, SmolbrenError
+from .graph import (
+    graph_stats as compute_graph_stats,
+)
+from .graph import (
+    load_graph,
+    shortest_path,
+)
+from .graph import (
+    neighbors as graph_neighbors,
+)
 from .index import connect
 from .index import stats as index_stats
 from .ingest import ingest_vault, watch_vault
@@ -359,6 +369,156 @@ def stats_cmd(
                 f"[yellow]warning:[/yellow] {s.types['<untyped>']} page(s) lack a "
                 "frontmatter `type:` — these will be skipped by ontology validation."
             )
+
+
+graph_app = typer.Typer(
+    help="Knowledge graph queries (neighbors / path / stats).",
+    no_args_is_help=True,
+)
+app.add_typer(graph_app, name="graph")
+
+
+@graph_app.command("neighbors")
+def graph_neighbors_cmd(
+    slug: str = typer.Argument(..., help="Source slug. Try `smolbren stats` to see slugs."),
+    vault: Path | None = VaultOption,
+    edge_type: str | None = typer.Option(
+        None, "--type", help="Restrict traversal to this relation type."
+    ),
+    depth: int = typer.Option(2, "--depth", help="Max BFS depth from the source."),
+    direction: str = typer.Option(
+        "out", "--direction", help="out (default) | in | both"
+    ),
+    json_out: bool = JsonOption,
+) -> None:
+    """List slugs reachable from SLUG within --depth hops."""
+    _configure_logging(json_out)
+    vault_path = config_mod.resolve_vault(vault)
+    cfg = _load_or_die(vault_path)
+    conn = connect(cfg.db_path)
+    try:
+        try:
+            graph = load_graph(conn)
+            hits = graph_neighbors(
+                graph, slug, edge_type=edge_type, depth=depth, direction=direction
+            )
+        except GraphError as e:
+            _die(str(e))
+            return
+    finally:
+        conn.close()
+
+    if json_out:
+        _emit_json(
+            [
+                {"slug": h.slug, "distance": h.distance, "edge_types": list(h.edge_types)}
+                for h in hits
+            ]
+        )
+        return
+    if not hits:
+        console.print(f"[yellow]no neighbors[/yellow] for {slug!r}")
+        return
+    table = Table(title=f"neighbors of {slug!r} (depth ≤ {depth})")
+    table.add_column("dist", justify="right", style="cyan")
+    table.add_column("slug", style="green")
+    table.add_column("via", style="magenta")
+    for h in hits:
+        table.add_row(str(h.distance), h.slug, " → ".join(h.edge_types))
+    console.print(table)
+
+
+@graph_app.command("path")
+def graph_path_cmd(
+    src: str = typer.Argument(..., help="Source slug."),
+    dst: str = typer.Argument(..., help="Destination slug."),
+    vault: Path | None = VaultOption,
+    json_out: bool = JsonOption,
+) -> None:
+    """Print the shortest path between two slugs (any edge type)."""
+    _configure_logging(json_out)
+    vault_path = config_mod.resolve_vault(vault)
+    cfg = _load_or_die(vault_path)
+    conn = connect(cfg.db_path)
+    try:
+        graph = load_graph(conn)
+        path = shortest_path(graph, src, dst)
+    finally:
+        conn.close()
+
+    if json_out:
+        _emit_json({"path": path})
+        return
+    if path is None:
+        console.print(f"[yellow]no path[/yellow] from {src!r} to {dst!r}")
+        return
+    console.print(" → ".join(path))
+
+
+@graph_app.command("stats")
+def graph_stats_cmd(
+    vault: Path | None = VaultOption,
+    top: int = typer.Option(10, "--top", help="How many top-degree nodes to show."),
+    json_out: bool = JsonOption,
+) -> None:
+    """Print graph-level stats: node/edge count, components, type distribution."""
+    _configure_logging(json_out)
+    vault_path = config_mod.resolve_vault(vault)
+    cfg = _load_or_die(vault_path)
+    conn = connect(cfg.db_path)
+    try:
+        graph = load_graph(conn)
+        s = compute_graph_stats(graph, top_n=top)
+    finally:
+        conn.close()
+
+    if json_out:
+        _emit_json(
+            {
+                "nodes": s.nodes,
+                "edges": s.edges,
+                "components": s.components,
+                "type_distribution": s.type_distribution,
+                "top_in_degree": [
+                    {"slug": slug_, "in": deg} for slug_, deg in s.top_in_degree
+                ],
+                "top_out_degree": [
+                    {"slug": slug_, "out": deg} for slug_, deg in s.top_out_degree
+                ],
+            }
+        )
+        return
+
+    overview = Table(title="graph overview")
+    overview.add_column("metric", style="cyan")
+    overview.add_column("value", justify="right")
+    overview.add_row("nodes", str(s.nodes))
+    overview.add_row("edges", str(s.edges))
+    overview.add_row("weakly-connected components", str(s.components))
+    console.print(overview)
+
+    if s.type_distribution:
+        types = Table(title="edges by relation type")
+        types.add_column("type", style="magenta")
+        types.add_column("count", justify="right")
+        for t, n in s.type_distribution.items():
+            types.add_row(t, str(n))
+        console.print(types)
+
+    if s.top_in_degree:
+        in_table = Table(title=f"top {top} by in-degree (most cited)")
+        in_table.add_column("slug", style="green")
+        in_table.add_column("in", justify="right")
+        for slug_, deg in s.top_in_degree:
+            in_table.add_row(slug_, str(deg))
+        console.print(in_table)
+    if s.top_out_degree:
+        out_table = Table(title=f"top {top} by out-degree (most linking)")
+        out_table.add_column("slug", style="green")
+        out_table.add_column("out", justify="right")
+        for slug_, deg in s.top_out_degree:
+            out_table.add_row(slug_, str(deg))
+        console.print(out_table)
 
 
 def main() -> None:
