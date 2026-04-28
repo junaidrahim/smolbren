@@ -1,6 +1,6 @@
 [project]
 name = "smolbren"
-version = "0.1.1"
+version = "1.0.0"
 description = "Local-first second-brain CLI for Obsidian vaults: hybrid search, typed knowledge graph, MCP server."
 readme = "README.md"
 authors = [
