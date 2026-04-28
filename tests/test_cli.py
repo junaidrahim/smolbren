@@ -52,6 +52,13 @@ def test_double_init_errors(tmp_path: Path) -> None:
     assert "already initialized" in second.output.lower()
 
 
+def test_cli_version_flag() -> None:
+    runner = CliRunner()
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip()
+
+
 def test_stats_human_readable(tmp_path: Path) -> None:
     runner = CliRunner()
     build_vault(tmp_path, n_pages=2)

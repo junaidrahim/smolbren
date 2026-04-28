@@ -45,6 +45,27 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from . import __version__
+
+        console.print(__version__)
+        raise typer.Exit()
+
+
+@app.callback()
+def _root(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the smolbren version and exit.",
+    ),
+) -> None:
+    """Local-first second-brain CLI for Obsidian vaults."""
+
+
 def _configure_logging(json_mode: bool) -> None:
     level = logging.INFO
     if json_mode:
