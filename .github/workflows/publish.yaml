@@ -25,7 +25,7 @@ jobs:
       - name: Run semantic-release
         id: semrel
         run: |
-          if semantic-release version --push; then
+          if semantic-release version --push --strict; then
             echo "released=true" >> "$GITHUB_OUTPUT"
           else
             echo "released=false" >> "$GITHUB_OUTPUT"
