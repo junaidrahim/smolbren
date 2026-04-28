@@ -118,5 +118,5 @@ Bump rules:
 | `chore:`, `docs:`, `ci:`, `style:`, `test:`, `refactor:`, `build:` | none |
 
 Non-conforming commit messages are ignored (no version bump). Reference
-implementation: `.github/workflows/release.yml` and the
+implementation: `.github/workflows/publish.yaml` and the
 `[tool.semantic_release]` block in `pyproject.toml`.
