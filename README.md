@@ -97,3 +97,26 @@ uv run pytest
 uv run ruff check
 uv run mypy
 ```
+
+## Release process
+
+Releases are fully automated. Every push to `main` is parsed for
+[Conventional Commits](https://www.conventionalcommits.org/); if any
+commit since the last tag is `feat:`, `fix:`, `perf:`, or contains
+`BREAKING CHANGE`, [`python-semantic-release`](https://python-semantic-release.readthedocs.io)
+bumps the version, commits the bump back to `main` (with `[skip ci]`),
+tags it, creates a GitHub Release, and publishes the wheel + sdist to
+PyPI via the `pypi` trusted-publisher environment.
+
+Bump rules:
+
+| Prefix | Bump |
+|---|---|
+| `feat:` | minor |
+| `fix:`, `perf:` | patch |
+| any commit body with `BREAKING CHANGE:` | major |
+| `chore:`, `docs:`, `ci:`, `style:`, `test:`, `refactor:`, `build:` | none |
+
+Non-conforming commit messages are ignored (no version bump). Reference
+implementation: `.github/workflows/release.yml` and the
+`[tool.semantic_release]` block in `pyproject.toml`.
