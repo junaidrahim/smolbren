@@ -38,11 +38,13 @@ from watchdog.observers.api import BaseObserver
 
 from .config import Config
 from .errors import IngestError
+from .extract import extract_edges
 from .index import (
     all_slugs,
     delete_pages_by_slugs,
     get_page_by_slug,
     replace_chunks,
+    replace_edges_for_source,
     transaction,
     upsert_page,
 )
@@ -176,6 +178,7 @@ class IngestResult:
     skipped_unchanged: int
     deleted: int
     chunks_written: int
+    edges_written: int
     duration_s: float
 
 
@@ -198,15 +201,22 @@ def _extract_title(metadata: dict[str, Any], body: str, slug: str) -> str:
     return slug.rsplit("/", 1)[-1]
 
 
+@dataclass(frozen=True)
+class FileIngestResult:
+    was_upserted: bool
+    chunk_count: int
+    edge_count: int
+
+
 def ingest_file(
     conn: sqlite3.Connection,
     config: Config,
     file_path: Path,
-) -> tuple[bool, int]:
-    """Ingest a single markdown file. Returns (was_upserted, chunk_count).
+) -> FileIngestResult:
+    """Ingest a single markdown file.
 
-    `was_upserted=False` means the file's content_hash matched the existing row
-    and nothing was rewritten.
+    Returns a `FileIngestResult`. `was_upserted=False` means the file's
+    content_hash matched the existing row and nothing was rewritten.
     """
     try:
         raw = file_path.read_bytes()
@@ -218,7 +228,7 @@ def ingest_file(
 
     existing = get_page_by_slug(conn, slug)
     if existing is not None and existing.content_hash == file_hash:
-        return False, 0
+        return FileIngestResult(was_upserted=False, chunk_count=0, edge_count=0)
 
     try:
         post = frontmatter.loads(raw.decode("utf-8"))
@@ -248,6 +258,11 @@ def ingest_file(
         for i, (heading, text) in enumerate(chunk_pairs)
     ]
 
+    edges = extract_edges(slug=slug, frontmatter=metadata, body=body)
+    edge_tuples: list[tuple[str, str, str, float]] = [
+        (e.src_slug, e.dst_slug, e.relation_type, e.confidence) for e in edges
+    ]
+
     with transaction(conn):
         page_id = upsert_page(
             conn,
@@ -260,8 +275,13 @@ def ingest_file(
             mtime=mtime,
         )
         replace_chunks(conn, page_id=page_id, chunks=chunk_rows)
+        replace_edges_for_source(conn, source_slug=slug, edges=edge_tuples)
 
-    return True, len(chunk_rows)
+    return FileIngestResult(
+        was_upserted=True,
+        chunk_count=len(chunk_rows),
+        edge_count=len(edge_tuples),
+    )
 
 
 def ingest_vault(
@@ -273,7 +293,7 @@ def ingest_vault(
     """Full vault ingest with deletion reconciliation."""
     started = time.perf_counter()
     seen: set[str] = set()
-    processed = upserted = chunks_written = 0
+    processed = upserted = chunks_written = edges_written = 0
     skipped_unchanged = 0
 
     for file_path in iter_markdown_files(config.vault, config.ignore.patterns):
@@ -282,14 +302,15 @@ def ingest_vault(
         if progress is not None:
             progress(file_path)
         try:
-            was_upserted, n_chunks = ingest_file(conn, config, file_path)
+            res = ingest_file(conn, config, file_path)
         except IngestError:
             log.exception("ingest failed: %s", file_path)
             continue
         processed += 1
-        if was_upserted:
+        if res.was_upserted:
             upserted += 1
-            chunks_written += n_chunks
+            chunks_written += res.chunk_count
+            edges_written += res.edge_count
         else:
             skipped_unchanged += 1
 
@@ -306,6 +327,7 @@ def ingest_vault(
         skipped_unchanged=skipped_unchanged,
         deleted=deleted,
         chunks_written=chunks_written,
+        edges_written=edges_written,
         duration_s=time.perf_counter() - started,
     )
 
@@ -427,9 +449,9 @@ def watch_vault(
                     if on_event is not None:
                         on_event(path, True, existed, 0)
                     return
-                was_upserted, n = ingest_file(conn, config, path)
+                res = ingest_file(conn, config, path)
                 if on_event is not None:
-                    on_event(path, False, was_upserted, n)
+                    on_event(path, False, res.was_upserted, res.chunk_count)
             except IngestError:
                 log.exception("watch ingest failed: %s", path)
 

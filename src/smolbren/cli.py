@@ -161,6 +161,7 @@ def ingest_cmd(
                 "skipped_unchanged": result.skipped_unchanged,
                 "deleted": result.deleted,
                 "chunks_written": result.chunks_written,
+                "edges_written": result.edges_written,
                 "duration_s": round(result.duration_s, 4),
             }
             if embed_summary is not None:
@@ -174,6 +175,7 @@ def ingest_cmd(
                 f"[green]ingest[/green] processed={result.processed} "
                 f"upserted={result.upserted} skipped={result.skipped_unchanged} "
                 f"deleted={result.deleted} chunks={result.chunks_written} "
+                f"edges={result.edges_written} "
                 f"in {result.duration_s:.2f}s"
             )
             if embed_summary is not None:

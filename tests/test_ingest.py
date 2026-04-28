@@ -184,11 +184,11 @@ def test_ingest_skips_when_only_chunk_text_unchanged(tmp_path: Path) -> None:
     cfg = load_config(vault)
     conn = connect(cfg.db_path)
     try:
-        was_upserted, n = ingest_file(conn, cfg, p)
-        assert was_upserted is True
-        assert n >= 1
-        was_upserted, n = ingest_file(conn, cfg, p)
-        assert was_upserted is False
-        assert n == 0
+        res = ingest_file(conn, cfg, p)
+        assert res.was_upserted is True
+        assert res.chunk_count >= 1
+        res = ingest_file(conn, cfg, p)
+        assert res.was_upserted is False
+        assert res.chunk_count == 0
     finally:
         conn.close()

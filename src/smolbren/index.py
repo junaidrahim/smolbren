@@ -276,7 +276,12 @@ def replace_chunks(
 
 
 def delete_page_by_slug(conn: sqlite3.Connection, slug: str) -> bool:
-    """Remove a page (cascades to chunks). Returns True if a row was deleted."""
+    """Remove a page (cascades to chunks). Returns True if a row was deleted.
+
+    Also cleans up the page's vec_chunks rows (no FK cascade for virtual
+    tables) and any links discovered on this page (the page's authority over
+    its `source_page` rows ends when the page goes away).
+    """
     chunk_ids = [
         int(r[0])
         for r in conn.execute(
@@ -288,6 +293,7 @@ def delete_page_by_slug(conn: sqlite3.Connection, slug: str) -> bool:
     deleted = cur.fetchone() is not None
     if deleted:
         _delete_vec_rows(conn, chunk_ids)
+        conn.execute("DELETE FROM links WHERE source_page = ?", (slug,))
     return deleted
 
 
@@ -322,6 +328,39 @@ def get_page_by_slug(conn: sqlite3.Connection, slug: str) -> PageRow | None:
 
 def all_slugs(conn: sqlite3.Connection) -> set[str]:
     return {str(r[0]) for r in conn.execute("SELECT slug FROM pages")}
+
+
+# --- edges -----------------------------------------------------------------
+
+
+def replace_edges_for_source(
+    conn: sqlite3.Connection,
+    *,
+    source_slug: str,
+    edges: Sequence[tuple[str, str, str, float]],
+) -> None:
+    """Replace all edges discovered from `source_slug`.
+
+    Each tuple is (src_slug, dst_slug, type, confidence). The reconciliation
+    is delete-then-insert keyed on `source_page` — atomic and simpler than
+    diffing.
+    """
+    conn.execute("DELETE FROM links WHERE source_page = ?", (source_slug,))
+    if not edges:
+        return
+    now = time.time()
+    conn.executemany(
+        """
+        INSERT OR IGNORE INTO links
+            (src_slug, dst_slug, type, source_page, confidence, extracted_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        [(src, dst, t, source_slug, conf, now) for (src, dst, t, conf) in edges],
+    )
+
+
+def delete_edges_for_source(conn: sqlite3.Connection, source_slug: str) -> None:
+    conn.execute("DELETE FROM links WHERE source_page = ?", (source_slug,))
 
 
 # --- chunks for embedding/search ------------------------------------------
