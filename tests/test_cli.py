@@ -22,7 +22,7 @@ def test_init_then_ingest_then_stats_json(tmp_path: Path) -> None:
     assert init_data["vault"]
     assert init_data["config"].endswith("config.toml")
 
-    ingest = runner.invoke(app, ["ingest", "--vault", str(tmp_path), "--json"])
+    ingest = runner.invoke(app, ["ingest", "--vault", str(tmp_path), "--no-embed", "--json"])
     assert ingest.exit_code == 0, ingest.output
     ingest_data = json.loads(ingest.output)
     assert ingest_data["processed"] == 5
@@ -38,7 +38,7 @@ def test_init_then_ingest_then_stats_json(tmp_path: Path) -> None:
 
 def test_ingest_before_init_errors(tmp_path: Path) -> None:
     runner = CliRunner()
-    result = runner.invoke(app, ["ingest", "--vault", str(tmp_path)])
+    result = runner.invoke(app, ["ingest", "--vault", str(tmp_path), "--no-embed"])
     assert result.exit_code == 1
     assert "not initialized" in result.output.lower()
 
@@ -56,7 +56,7 @@ def test_stats_human_readable(tmp_path: Path) -> None:
     runner = CliRunner()
     build_vault(tmp_path, n_pages=2)
     runner.invoke(app, ["init", "--vault", str(tmp_path)])
-    runner.invoke(app, ["ingest", "--vault", str(tmp_path)])
+    runner.invoke(app, ["ingest", "--vault", str(tmp_path), "--no-embed"])
     result = runner.invoke(app, ["stats", "--vault", str(tmp_path)])
     assert result.exit_code == 0
     assert "pages" in result.output

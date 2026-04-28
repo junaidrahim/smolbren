@@ -82,6 +82,18 @@ MIGRATIONS: list[str] = [
       tokenize='porter unicode61'
     );
     """,
+    # 3: content-hash-keyed embedding cache (survives chunk deletions, so
+    #    renaming a file or recreating identical content avoids re-embedding).
+    """
+    CREATE TABLE IF NOT EXISTS embedding_cache (
+      content_hash TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dim INTEGER NOT NULL,
+      embedding BLOB NOT NULL,
+      created_at REAL NOT NULL,
+      PRIMARY KEY (content_hash, model)
+    );
+    """,
 ]
 
 
@@ -196,6 +208,17 @@ def upsert_page(
     return int(row[0])
 
 
+def _delete_vec_rows(conn: sqlite3.Connection, chunk_ids: Sequence[int]) -> None:
+    """sqlite-vec virtual tables don't get FK cascades; drop their rows manually."""
+    if not chunk_ids:
+        return
+    placeholders = ",".join("?" * len(chunk_ids))
+    conn.execute(
+        f"DELETE FROM vec_chunks WHERE chunk_id IN ({placeholders})",
+        list(chunk_ids),
+    )
+
+
 def replace_chunks(
     conn: sqlite3.Connection,
     *,
@@ -206,7 +229,11 @@ def replace_chunks(
 
     Each tuple is (ord, heading, text, content_hash).
     """
+    old_ids = [
+        int(r[0]) for r in conn.execute("SELECT id FROM chunks WHERE page_id = ?", (page_id,))
+    ]
     conn.execute("DELETE FROM chunks WHERE page_id = ?", (page_id,))
+    _delete_vec_rows(conn, old_ids)
     if not chunks:
         return
     conn.executemany(
@@ -217,8 +244,18 @@ def replace_chunks(
 
 def delete_page_by_slug(conn: sqlite3.Connection, slug: str) -> bool:
     """Remove a page (cascades to chunks). Returns True if a row was deleted."""
+    chunk_ids = [
+        int(r[0])
+        for r in conn.execute(
+            "SELECT c.id FROM chunks c JOIN pages p ON c.page_id = p.id WHERE p.slug = ?",
+            (slug,),
+        )
+    ]
     cur = conn.execute("DELETE FROM pages WHERE slug = ? RETURNING id", (slug,))
-    return cur.fetchone() is not None
+    deleted = cur.fetchone() is not None
+    if deleted:
+        _delete_vec_rows(conn, chunk_ids)
+    return deleted
 
 
 def delete_pages_by_slugs(conn: sqlite3.Connection, slugs: Iterable[str]) -> int:
@@ -252,6 +289,110 @@ def get_page_by_slug(conn: sqlite3.Connection, slug: str) -> PageRow | None:
 
 def all_slugs(conn: sqlite3.Connection) -> set[str]:
     return {str(r[0]) for r in conn.execute("SELECT slug FROM pages")}
+
+
+# --- chunks for embedding/search ------------------------------------------
+
+
+@dataclass(frozen=True)
+class PendingChunk:
+    chunk_id: int
+    content_hash: str
+    text: str
+
+
+def chunks_without_embedding(conn: sqlite3.Connection) -> list[PendingChunk]:
+    """Return chunks that don't yet have a row in `vec_chunks`."""
+    rows = conn.execute(
+        """
+        SELECT c.id, c.content_hash, c.text
+        FROM chunks c
+        LEFT JOIN vec_chunks v ON v.chunk_id = c.id
+        WHERE v.chunk_id IS NULL
+        ORDER BY c.id
+        """
+    ).fetchall()
+    return [
+        PendingChunk(chunk_id=int(r[0]), content_hash=str(r[1]), text=str(r[2])) for r in rows
+    ]
+
+
+def lookup_cached_embedding(
+    conn: sqlite3.Connection,
+    *,
+    content_hash: str,
+    model: str,
+) -> bytes | None:
+    row = conn.execute(
+        "SELECT embedding FROM embedding_cache WHERE content_hash = ? AND model = ?",
+        (content_hash, model),
+    ).fetchone()
+    return bytes(row[0]) if row is not None else None
+
+
+def store_embedding(
+    conn: sqlite3.Connection,
+    *,
+    chunk_id: int,
+    content_hash: str,
+    model: str,
+    dim: int,
+    embedding_bytes: bytes,
+    cache: bool = True,
+) -> None:
+    """Write an embedding to vec_chunks and (optionally) embedding_cache."""
+    conn.execute(
+        "INSERT OR REPLACE INTO vec_chunks(chunk_id, embedding) VALUES (?, ?)",
+        (chunk_id, embedding_bytes),
+    )
+    if cache:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO embedding_cache
+                (content_hash, model, dim, embedding, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (content_hash, model, dim, embedding_bytes, time.time()),
+        )
+
+
+@dataclass(frozen=True)
+class ChunkContext:
+    chunk_id: int
+    page_id: int
+    slug: str
+    title: str | None
+    heading: str | None
+    text: str
+
+
+def get_chunk_contexts(
+    conn: sqlite3.Connection, chunk_ids: Sequence[int]
+) -> dict[int, ChunkContext]:
+    """Bulk-load chunk + page context for a list of chunk ids."""
+    if not chunk_ids:
+        return {}
+    placeholders = ",".join("?" * len(chunk_ids))
+    rows = conn.execute(
+        f"""
+        SELECT c.id, c.page_id, p.slug, p.title, c.heading, c.text
+        FROM chunks c
+        JOIN pages p ON p.id = c.page_id
+        WHERE c.id IN ({placeholders})
+        """,
+        list(chunk_ids),
+    ).fetchall()
+    return {
+        int(r[0]): ChunkContext(
+            chunk_id=int(r[0]),
+            page_id=int(r[1]),
+            slug=str(r[2]),
+            title=r[3],
+            heading=r[4],
+            text=str(r[5]),
+        )
+        for r in rows
+    }
 
 
 # --- stats ----------------------------------------------------------------

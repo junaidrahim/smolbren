@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import signal
+import sqlite3
 import sys
 import time
 from pathlib import Path
@@ -16,10 +17,12 @@ from rich.console import Console
 from rich.table import Table
 
 from . import config as config_mod
-from .errors import ConfigError, SmolbrenError
+from .embed import embed_pending
+from .errors import ConfigError, EmbedError, SearchError, SmolbrenError
 from .index import connect
 from .index import stats as index_stats
 from .ingest import ingest_vault, watch_vault
+from .search import vector_search
 
 app = typer.Typer(
     name="smolbren",
@@ -52,6 +55,10 @@ def _configure_logging(json_mode: bool) -> None:
             wrapper_class=structlog.make_filtering_bound_logger(level),
         )
     logging.basicConfig(level=level, format="%(message)s")
+    # httpx logs every request at INFO; the underlying ollama call is implied
+    # by our own embed/search messages, so we mute it here.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 VaultOption = typer.Option(
@@ -110,33 +117,58 @@ def _load_or_die(vault_path: Path) -> config_mod.Config:
         raise  # for type checker; _die raises
 
 
+def _run_embed(conn: sqlite3.Connection, cfg: config_mod.Config) -> tuple[int, int, float] | None:
+    """Try to embed pending chunks. Returns (embedded, cache_hits, duration) or
+    None if Ollama is unreachable (we warn and continue)."""
+    try:
+        result = embed_pending(conn, cfg)
+    except EmbedError as e:
+        err_console.print(
+            f"[yellow]embed skipped:[/yellow] {e}\n"
+            "  Run `smolbren embed` later (or start Ollama and re-run ingest)."
+        )
+        return None
+    return result.embedded, result.cache_hits, result.duration_s
+
+
 @app.command("ingest")
 def ingest_cmd(
     vault: Path | None = VaultOption,
     watch: bool = typer.Option(False, "--watch", help="Watch the vault and re-ingest on change."),
+    no_embed: bool = typer.Option(
+        False, "--no-embed", help="Skip the embedding pass after ingest."
+    ),
     debounce_ms: int = typer.Option(
         500, "--debounce-ms", help="Per-file debounce window in --watch mode."
     ),
     json_out: bool = JsonOption,
 ) -> None:
-    """Ingest the vault: parse → chunk → upsert. With --watch, stays running."""
+    """Ingest the vault: parse → chunk → upsert → embed. With --watch, stays running."""
     _configure_logging(json_out)
     vault_path = config_mod.resolve_vault(vault)
     cfg = _load_or_die(vault_path)
     conn = connect(cfg.db_path)
     try:
         result = ingest_vault(conn, cfg)
+        embed_summary: tuple[int, int, float] | None = None
+        if not no_embed:
+            embed_summary = _run_embed(conn, cfg)
+
         if json_out:
-            _emit_json(
-                {
-                    "processed": result.processed,
-                    "upserted": result.upserted,
-                    "skipped_unchanged": result.skipped_unchanged,
-                    "deleted": result.deleted,
-                    "chunks_written": result.chunks_written,
-                    "duration_s": round(result.duration_s, 4),
-                }
-            )
+            payload = {
+                "processed": result.processed,
+                "upserted": result.upserted,
+                "skipped_unchanged": result.skipped_unchanged,
+                "deleted": result.deleted,
+                "chunks_written": result.chunks_written,
+                "duration_s": round(result.duration_s, 4),
+            }
+            if embed_summary is not None:
+                emb, hits, dur = embed_summary
+                payload["embedded"] = emb
+                payload["cache_hits"] = hits
+                payload["embed_duration_s"] = round(dur, 4)
+            _emit_json(payload)
         else:
             console.print(
                 f"[green]ingest[/green] processed={result.processed} "
@@ -144,6 +176,11 @@ def ingest_cmd(
                 f"deleted={result.deleted} chunks={result.chunks_written} "
                 f"in {result.duration_s:.2f}s"
             )
+            if embed_summary is not None:
+                emb, hits, dur = embed_summary
+                console.print(
+                    f"[green]embed[/green] embedded={emb} cache_hits={hits} in {dur:.2f}s"
+                )
 
         if not watch:
             return
@@ -164,6 +201,8 @@ def ingest_cmd(
             else:
                 kind = "deleted" if deleted else ("upserted" if was_upserted else "unchanged")
                 console.print(f"  [{kind}] {path} ({chunks} chunks)")
+            if not deleted and was_upserted and not no_embed:
+                _run_embed(conn, cfg)
 
         observer = watch_vault(conn, cfg, debounce_s=debounce_ms / 1000.0, on_event=on_event)
 
@@ -184,6 +223,93 @@ def ingest_cmd(
             observer.join(timeout=5.0)
     finally:
         conn.close()
+
+
+@app.command("embed")
+def embed_cmd(
+    vault: Path | None = VaultOption,
+    json_out: bool = JsonOption,
+) -> None:
+    """Embed all chunks that don't yet have a vector (cache-aware)."""
+    _configure_logging(json_out)
+    vault_path = config_mod.resolve_vault(vault)
+    cfg = _load_or_die(vault_path)
+    conn = connect(cfg.db_path)
+    try:
+        try:
+            result = embed_pending(conn, cfg)
+        except EmbedError as e:
+            _die(str(e))
+            return
+    finally:
+        conn.close()
+    if json_out:
+        _emit_json(
+            {
+                "embedded": result.embedded,
+                "cache_hits": result.cache_hits,
+                "duration_s": round(result.duration_s, 4),
+            }
+        )
+    else:
+        console.print(
+            f"[green]embed[/green] embedded={result.embedded} "
+            f"cache_hits={result.cache_hits} in {result.duration_s:.2f}s"
+        )
+
+
+@app.command("search")
+def search_cmd(
+    query: str = typer.Argument(..., help="The search query."),
+    vault: Path | None = VaultOption,
+    mode: str = typer.Option("vector", "--mode", help="vector | keyword | hybrid (M3+)."),
+    top_k: int = typer.Option(5, "--top-k", help="Number of results to return."),
+    json_out: bool = JsonOption,
+) -> None:
+    """Search the vault by semantic / keyword / hybrid match."""
+    _configure_logging(json_out)
+    if mode not in {"vector", "keyword", "hybrid"}:
+        _die(f"unknown --mode {mode!r}; expected vector|keyword|hybrid")
+    if mode != "vector":
+        _die(f"--mode {mode!r} is not implemented yet (M3 wires this in)")
+    vault_path = config_mod.resolve_vault(vault)
+    cfg = _load_or_die(vault_path)
+    conn = connect(cfg.db_path)
+    try:
+        try:
+            hits = vector_search(conn, cfg, query, top_k=top_k)
+        except (SearchError, EmbedError) as e:
+            _die(str(e))
+            return
+    finally:
+        conn.close()
+
+    if json_out:
+        _emit_json(
+            [
+                {
+                    "slug": h.slug,
+                    "title": h.title,
+                    "heading": h.heading,
+                    "score": round(h.score, 4),
+                    "snippet": h.snippet,
+                }
+                for h in hits
+            ]
+        )
+        return
+
+    if not hits:
+        console.print("[yellow]no results[/yellow]")
+        return
+    table = Table(title=f"search ({mode}) — {query!r}")
+    table.add_column("score", justify="right", style="cyan")
+    table.add_column("slug", style="green")
+    table.add_column("heading", style="magenta")
+    table.add_column("snippet")
+    for h in hits:
+        table.add_row(f"{h.score:.3f}", h.slug, h.heading or "—", h.snippet)
+    console.print(table)
 
 
 @app.command("stats")
