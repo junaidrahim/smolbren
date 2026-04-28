@@ -22,7 +22,7 @@ from .errors import ConfigError, EmbedError, SearchError, SmolbrenError
 from .index import connect
 from .index import stats as index_stats
 from .ingest import ingest_vault, watch_vault
-from .search import vector_search
+from .search import hybrid_search, keyword_search, vector_search
 
 app = typer.Typer(
     name="smolbren",
@@ -262,7 +262,9 @@ def embed_cmd(
 def search_cmd(
     query: str = typer.Argument(..., help="The search query."),
     vault: Path | None = VaultOption,
-    mode: str = typer.Option("vector", "--mode", help="vector | keyword | hybrid (M3+)."),
+    mode: str = typer.Option(
+        "hybrid", "--mode", help="hybrid (default) | vector | keyword."
+    ),
     top_k: int = typer.Option(5, "--top-k", help="Number of results to return."),
     json_out: bool = JsonOption,
 ) -> None:
@@ -270,14 +272,17 @@ def search_cmd(
     _configure_logging(json_out)
     if mode not in {"vector", "keyword", "hybrid"}:
         _die(f"unknown --mode {mode!r}; expected vector|keyword|hybrid")
-    if mode != "vector":
-        _die(f"--mode {mode!r} is not implemented yet (M3 wires this in)")
     vault_path = config_mod.resolve_vault(vault)
     cfg = _load_or_die(vault_path)
     conn = connect(cfg.db_path)
     try:
         try:
-            hits = vector_search(conn, cfg, query, top_k=top_k)
+            if mode == "vector":
+                hits = vector_search(conn, cfg, query, top_k=top_k)
+            elif mode == "keyword":
+                hits = keyword_search(conn, query, top_k=top_k)
+            else:
+                hits = hybrid_search(conn, cfg, query, top_k=top_k)
         except (SearchError, EmbedError) as e:
             _die(str(e))
             return
@@ -308,7 +313,7 @@ def search_cmd(
     table.add_column("heading", style="magenta")
     table.add_column("snippet")
     for h in hits:
-        table.add_row(f"{h.score:.3f}", h.slug, h.heading or "—", h.snippet)
+        table.add_row(f"{h.score:.4g}", h.slug, h.heading or "—", h.snippet)
     console.print(table)
 
 

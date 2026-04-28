@@ -94,6 +94,39 @@ MIGRATIONS: list[str] = [
       PRIMARY KEY (content_hash, model)
     );
     """,
+    # 4: rebuild FTS5 without the bogus `slug` column (slug lives on pages,
+    #    not chunks; with content=chunks FTS5 needs every named column to
+    #    exist on the source table). Install AI/AD/AU triggers so FTS stays
+    #    in sync going forward, then backfill from any existing chunks.
+    """
+    DROP TABLE IF EXISTS fts_chunks;
+
+    CREATE VIRTUAL TABLE fts_chunks USING fts5(
+      text, heading,
+      content=chunks, content_rowid=id,
+      tokenize='porter unicode61'
+    );
+
+    CREATE TRIGGER IF NOT EXISTS chunks_ai AFTER INSERT ON chunks BEGIN
+      INSERT INTO fts_chunks(rowid, text, heading)
+      VALUES (new.id, new.text, new.heading);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS chunks_ad AFTER DELETE ON chunks BEGIN
+      INSERT INTO fts_chunks(fts_chunks, rowid, text, heading)
+      VALUES('delete', old.id, old.text, old.heading);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS chunks_au AFTER UPDATE ON chunks BEGIN
+      INSERT INTO fts_chunks(fts_chunks, rowid, text, heading)
+      VALUES('delete', old.id, old.text, old.heading);
+      INSERT INTO fts_chunks(rowid, text, heading)
+      VALUES (new.id, new.text, new.heading);
+    END;
+
+    INSERT INTO fts_chunks(rowid, text, heading)
+      SELECT id, text, heading FROM chunks;
+    """,
 ]
 
 
