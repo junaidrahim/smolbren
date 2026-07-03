@@ -1,0 +1,67 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write # for tagging published versions
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    # never let two pushes race a publish
+    concurrency: crates-publish
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # crates.io rejects duplicate versions, so publish only when the
+      # version in Cargo.toml is not on crates.io yet. Pushes without a
+      # version bump run tests and skip the publish step green.
+      - name: Check if version is already published
+        id: check
+        run: |
+          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -A "smolbren-release-workflow (github.com/junaidrahim/smolbren)" \
+            "https://crates.io/api/v1/crates/smolbren/$VERSION")
+          if [ "$STATUS" = "200" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "smolbren $VERSION already on crates.io — skipping publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "smolbren $VERSION not on crates.io — will publish"
+          fi
+
+      - name: Publish to crates.io
+        if: steps.check.outputs.published == 'false'
+        run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Tag the release
+        if: steps.check.outputs.published == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "v${{ steps.check.outputs.version }}"
+          git push origin "v${{ steps.check.outputs.version }}"

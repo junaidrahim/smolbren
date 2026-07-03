@@ -2,6 +2,12 @@
 name = "smolbren"
 version = "0.1.0"
 edition = "2024"
+description = "Ontology-first search over markdown vaults: frontmatter types become a queryable graph, with BM25 full-text search on top"
+license = "MIT"
+repository = "https://github.com/junaidrahim/smolbren"
+readme = "README.md"
+keywords = ["obsidian", "markdown", "search", "knowledge-graph", "cypher"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
