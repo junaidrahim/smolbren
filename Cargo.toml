@@ -1,0 +1,37 @@
+[package]
+name = "smolbren"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml_ng = "0.10"
+
+# The lance/arrow/datafusion versions below are locked together:
+# lance-graph 0.5.4 pins lance ^1.0, arrow ^56.2, datafusion ^50.3.
+# Do NOT bump lance past 1.x until lance-graph tracks a newer release,
+# or the build breaks with mismatched arrow RecordBatch types.
+# Check with: cargo tree -d
+lance = "1.0"
+lance-index = "1.0"
+lance-graph = "0.5.4"
+arrow = "56.2"
+arrow-array = "56.2"
+arrow-schema = "56.2"
+
+futures = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+rayon = "1"
+ignore = "0.4"
+blake3 = "1"
+regex = "1"
+anyhow = "1"
+thiserror = "2"
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
