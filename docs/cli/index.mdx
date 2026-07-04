@@ -1,0 +1,68 @@
+---
+title: "smolbren index — build and update the search index"
+sidebarTitle: "index"
+description: "Build or update the smolbren search index for a vault. Supports incremental updates by default; use --full for a complete rebuild."
+---
+
+The `index` command scans every Markdown file in your vault, parses frontmatter and wikilinks, and writes the results into the search index used by all other commands. It must be run at least once before `search`, `query`, `get`, `links`, `backlinks`, `types`, or `edges` will work. After the initial index, run it again whenever your notes change to keep results current.
+
+## Synopsis
+
+```bash
+smolbren index [--full] [--vault <name>]
+```
+
+## Flags
+
+<ParamField query="--full" type="boolean">
+  Discard all previously stored data and rebuild the index from scratch. Every
+  note is re-read, re-hashed, and re-written, and all edge resolutions are
+  recomputed. Use this after renaming or moving many files, or when you suspect
+  the stored state has drifted from disk. Without `--full`, the incremental
+  strategy is used (see below).
+</ParamField>
+
+<ParamField query="--vault" type="string">
+  Name of the vault to index. Defaults to the configured default vault. Use
+  `smolbren vault list` to see registered vault names.
+</ParamField>
+
+## Output
+
+`index` returns a single JSON object summarising what happened during the run.
+
+```json
+{
+  "scanned": 9,
+  "unchanged": 0,
+  "added": 9,
+  "updated": 0,
+  "removed": 0,
+  "edges": 15,
+  "unresolved_edges": 3,
+  "duration_ms": 42
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `scanned` | integer | Total number of `.md` files found in the vault directory (hidden directories such as `.obsidian` are excluded) |
+| `unchanged` | integer | Files whose content and metadata matched the stored state and were skipped |
+| `added` | integer | Files that did not exist in the previous index and were newly added |
+| `updated` | integer | Files whose content changed since the last index run |
+| `removed` | integer | Files that were previously indexed but no longer exist on disk |
+| `edges` | integer | Total number of wikilink edges present in the index after this run |
+| `unresolved_edges` | integer | Edges whose target wikilink could not be matched to any indexed note |
+| `duration_ms` | integer | Wall-clock time the index run took, in milliseconds |
+
+## Incremental vs full rebuild
+
+**Incremental (default)** — smolbren checks each file's modification time and size before reading it. Files with unchanged metadata are skipped immediately. Files that are read but whose content hash matches the stored hash are updated in place (mtime converges) without triggering an edge recomputation. Only genuinely changed, added, or removed files are written to the dataset. This makes subsequent runs very fast on large vaults.
+
+**Full rebuild (`--full`)** — smolbren ignores all stored state, reads every file from scratch, and overwrites the notes and edges datasets entirely. Use a full rebuild when:
+
+- You have renamed or moved many files and want to recompute all edge resolutions from a clean state.
+- The incremental state appears corrupted or out of sync.
+- You want to verify the `unresolved_edges` count is accurate across the whole vault.
+
+A full rebuild is always slower than an incremental run but guarantees a consistent, authoritative result.

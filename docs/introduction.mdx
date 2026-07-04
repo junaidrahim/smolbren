@@ -1,0 +1,44 @@
+---
+title: "smolbren: ontology-first search for Markdown notes"
+sidebarTitle: "Introduction"
+description: "smolbren turns your Markdown vault into a queryable knowledge graph. Learn what it does, who it is for, and how its key concepts fit together."
+---
+
+**smolbren** is a local CLI that indexes a directory of Markdown files — typically an [Obsidian](https://obsidian.md/) vault — into a queryable knowledge graph backed by fast Lance columnar storage. It reads the `type` key in each note's YAML frontmatter to assign a graph node label, treats any other frontmatter key whose values contain wikilinks as a typed graph edge, and builds a BM25 full-text index over titles and bodies. Every command emits single-line JSON to stdout, making smolbren a first-class building block for AI agents, shell pipelines, and scripting workflows.
+
+## What smolbren does
+
+- **BM25 full-text search** — `smolbren search` ranks notes by relevance using Okapi BM25 over note titles and bodies. Results can be filtered to a specific note type with `--type`.
+- **Graph queries via Cypher** — `smolbren query` runs a Cypher statement over the note graph. Every frontmatter `type` becomes a node label; the built-in `Note` label matches every note regardless of type.
+- **Ontology auto-discovery** — after each index run smolbren writes an `ontology.json` file listing every discovered node type and edge type with counts, so agents can introspect the schema without scanning raw files.
+- **Incremental indexing** — `smolbren index` skips files whose modification time and size haven't changed, then content-hashes candidates to skip re-parsing files that were only `touch`-ed. A `--full` flag rebuilds from scratch when needed.
+- **Machine-readable JSON stdout** — every subcommand prints a single-line JSON object or array. Errors go to stderr as `{"error": "...", "code": "..."}`. Exit codes are stable: `0` ok, `1` internal, `3` vault not found, `4` note not found, `5` index missing.
+
+## Key concepts
+
+**Vault** — A vault is a directory of Markdown files registered with smolbren under a short name (e.g. `personal`). smolbren stores its index data separately in `~/.smolbren/vaults/<name>/`, leaving your note files completely untouched. You can register multiple vaults and switch between them with the global `--vault` flag or the `SMOLBREN_DEFAULT_VAULT` environment variable.
+
+**Note** — A note is a single `.md` file inside a vault. smolbren parses its YAML frontmatter and Markdown body, extracts an `id` derived from the file's path relative to the vault root (e.g. `blogs/context-engineering`), and stores metadata columns (`id`, `path`, `type`, `title`, `frontmatter_json`, `body`) alongside content hashes used for incremental updates.
+
+**Type** — The value of the `type` key in a note's frontmatter is its *node type*. It becomes a Cypher node label — so a note with `type: blog` can be matched as `(n:blog)`. Notes without a `type` key are still indexed; they match only the catch-all `Note` label. The `smolbren types` command lists every discovered type and its count.
+
+**Edge** — Any frontmatter key (other than `type`) whose values contain Obsidian-style wikilinks (e.g. `"[[projects/prism]]"`) becomes a *typed edge* in the graph. The key is the relationship type, the wikilink targets are the destination nodes. For example, `mentions: ["[[projects/prism]]", "[[repos/smolbren]]"]` creates two `mentions` edges. The `smolbren edges` command lists every discovered edge type and its count.
+
+**Ontology** — The ontology is the set of all discovered node types and edge types in a vault, stored as `ontology.json` alongside the Lance datasets. smolbren derives the ontology automatically from frontmatter — there is no schema file to maintain. The graph engine reads it at query time to build the correct node and relationship mappings for Cypher execution.
+
+## Use cases
+
+**Power users searching their PKM** — Stop scrolling and start querying. Find every note of type `project` that `mentions` a particular person, or full-text search across thousands of journal entries and blog drafts in milliseconds. smolbren runs entirely on your machine with no data leaving your disk.
+
+**AI agents querying a knowledge base** — Because every command outputs stable single-line JSON, smolbren is trivially usable as a tool in an LLM agent loop. An agent can call `smolbren search` to find relevant context, `smolbren get` to fetch a full note body, and `smolbren query` to traverse relationships — all without standing up a server or writing an integration layer.
+
+**Scripting and automation workflows** — Pipe smolbren output directly to `jq`, feed it into shell scripts, or consume it from Python and TypeScript without parsing Markdown yourself. Use `smolbren types` and `smolbren edges` to introspect what's in a vault before deciding what to query.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install smolbren and run your first search in under five minutes.
+  </Card>
+  <Card title="Vaults" icon="folder-open" href="/concepts/vaults">
+    Learn how to register, switch between, and manage multiple vaults.
+  </Card>
+</CardGroup>

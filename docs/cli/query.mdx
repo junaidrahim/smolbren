@@ -1,0 +1,161 @@
+---
+title: "smolbren query — Cypher queries over the knowledge graph"
+sidebarTitle: "query"
+description: "Execute Cypher queries over the graph built from your vault's frontmatter types and wikilink edges. Pass parameters with --param key=value."
+---
+
+The `query` command executes a Cypher query over the knowledge graph that smolbren builds from your vault. Every indexed note becomes a graph node and every wikilink found in frontmatter fields becomes a typed relationship. This lets you traverse your vault's structure with the full expressive power of Cypher — finding paths, filtering by property, aggregating connections, and more.
+
+## Synopsis
+
+```bash
+smolbren query <cypher> [--param key=value ...]
+```
+
+## Arguments and flags
+
+<ParamField path="cypher" type="string" required>
+  A Cypher query string. Quote it in your shell to prevent word-splitting.
+  Projection names in the `RETURN` clause become the column names in the
+  response. Both node patterns `(n:Label)` and relationship patterns
+  `()-[:TYPE]->()` are supported.
+</ParamField>
+
+<ParamField query="--param" type="string">
+  A query parameter as a `key=value` pair. Repeatable — pass `--param` multiple
+  times to supply several parameters. Reference parameters in your Cypher using
+  the `$key` syntax. Values are parsed as JSON first (so integers, booleans, and
+  floats work as their native types); if JSON parsing fails the value is treated
+  as a plain string.
+</ParamField>
+
+## Graph schema
+
+The graph is derived entirely from your vault's frontmatter and wikilinks. No manual schema definition is required.
+
+**Node labels** correspond to the `type` value in each note's frontmatter (e.g. `blog`, `project`, `org`). Every note is also available under the catch-all label `Note`, regardless of whether it has a `type` field. Node label matching is case-insensitive.
+
+**Relationship types** correspond to the frontmatter key that contained the wikilink. For example, if a note has `mentions: ["[[projects/prism]]"]` in its frontmatter, an edge of type `mentions` is created from that note to `projects/prism`.
+
+**Node properties** available in queries:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `id` | string | Vault-relative note ID, e.g. `blogs/context-engineering` |
+| `path` | string | Vault-relative file path including `.md` |
+| `type` | string | The note's frontmatter `type` value |
+| `title` | string | The note's title |
+
+Use `smolbren types` to list all node labels in your vault, and `smolbren edges` to list all relationship types, before writing queries.
+
+## Output format
+
+Returns a single JSON object with two fields:
+
+```json
+{
+  "columns": ["b.id", "b.title", "x.id"],
+  "rows": [
+    ["blogs/context-engineering", "Context engineering", "blogs/context-development-lifecycle"],
+    ["blogs/context-engineering", "Context engineering", "blogs/context-platform-engineering"]
+  ]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `columns` | string[] | Ordered list of projection names from the `RETURN` clause |
+| `rows` | array[] | Each element is an array of values in the same order as `columns`. An empty array means no rows matched. |
+
+## Parameters
+
+Pass runtime values using `--param` to avoid string-interpolating user input into your Cypher:
+
+```bash
+smolbren query 'MATCH (b:blog {id: $note_id}) RETURN b.title' \
+  --param note_id=blogs/context-engineering
+```
+
+Values are coerced by type:
+- `--param limit=5` → integer `5`
+- `--param active=true` → boolean `true`
+- `--param name=alice` → string `"alice"` (JSON parse fails, falls back to string)
+- `--param tags=["a","b"]` → JSON array `["a","b"]`
+
+## Examples
+
+**Find all blog posts and their titles**
+
+```bash
+smolbren query 'MATCH (b:blog) RETURN b.id, b.title'
+```
+
+```json
+{
+  "columns": ["b.id", "b.title"],
+  "rows": [
+    ["blogs/context-engineering", "Context engineering"],
+    ["blogs/context-development-lifecycle", "Context development lifecycle"],
+    ["blogs/context-platform-engineering", "Context platform engineering"]
+  ]
+}
+```
+
+**Traverse a relationship — find what a blog post was merged from**
+
+```bash
+smolbren query 'MATCH (b:blog)-[:merged_from]->(x:Note) RETURN b.id, x.id'
+```
+
+```json
+{
+  "columns": ["b.id", "x.id"],
+  "rows": [
+    ["blogs/context-engineering", "blogs/context-development-lifecycle"],
+    ["blogs/context-engineering", "blogs/context-platform-engineering"]
+  ]
+}
+```
+
+**Filter by property with a parameter**
+
+```bash
+smolbren query 'MATCH (n:Note {type: $t}) RETURN n.id, n.title' \
+  --param t=project
+```
+
+```json
+{
+  "columns": ["n.id", "n.title"],
+  "rows": [
+    ["projects/prism", "Prism"]
+  ]
+}
+```
+
+**Two-hop traversal — blogs that mention projects for a specific org**
+
+```bash
+smolbren query '
+  MATCH (b:blog)-[:mentions]->(p:project)-[:for]->(o:org {id: $org})
+  RETURN b.title, p.title
+' --param org=orgs/junaid-foo
+```
+
+```json
+{
+  "columns": ["b.title", "p.title"],
+  "rows": [
+    ["Context engineering", "Prism"]
+  ]
+}
+```
+
+<Warning>
+  The `body` (full Markdown text) and `frontmatter` fields are **not**
+  available as node properties in query results. The graph is built from slim
+  projections for performance — only `id`, `path`, `type`, and `title` are
+  available on graph nodes. To retrieve a note's full content or parsed
+  frontmatter, use [`smolbren get <id> --body`](/cli/get) after identifying the
+  note ID from a query.
+</Warning>

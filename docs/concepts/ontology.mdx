@@ -1,0 +1,89 @@
+---
+title: "Ontologies: types and edges auto-discovered from frontmatter"
+sidebarTitle: "Ontology"
+description: "smolbren builds an ontology from your notes' frontmatter automatically. The type key defines node labels; wikilink values define typed graph edges."
+---
+
+The **ontology** is smolbren's map of what kinds of notes exist in your vault and how they relate to each other. It is discovered automatically from your notes' YAML frontmatter — there is no schema to define upfront. Every time you run `smolbren index`, the ontology is rebuilt from scratch to reflect the current state of your vault.
+
+## Note types
+
+The special `type` frontmatter key becomes the node label for that note. For example:
+
+```yaml
+---
+type: blog
+title: Context engineering
+---
+```
+
+This note becomes a `blog` node in the graph. Any string value is accepted as a type — `project`, `org`, `repo`, `journal`, `person`, or anything else you use in your vault.
+
+Notes that do not have a `type` key are still fully indexed and queryable. They are reachable in graph queries using the catch-all label `Note`, which matches every note in the vault regardless of whether it declares a type.
+
+## Edge types
+
+Any frontmatter key — other than `type` — whose value is an Obsidian wikilink (`[[...]]`) or a list of wikilinks becomes a **typed directed edge**. The frontmatter key itself becomes the edge type (the relationship label). For example:
+
+```yaml
+---
+type: blog
+for: "[[orgs/junaid-foo]]"
+mentions: ["[[projects/prism]]", "[[repos/smolbren]]"]
+derives_from: ["[[Journal/2026, June 01]]", "[[Journal/2026, June 04]]"]
+---
+```
+
+This produces the following directed edges in the graph:
+
+| From | Edge type | To |
+|---|---|---|
+| `blogs/context-engineering` | `for` | `orgs/junaid-foo` |
+| `blogs/context-engineering` | `mentions` | `projects/prism` |
+| `blogs/context-engineering` | `mentions` | `repos/smolbren` |
+| `blogs/context-engineering` | `derives_from` | `Journal/2026, June 01` |
+| `blogs/context-engineering` | `derives_from` | `Journal/2026, June 04` |
+
+Frontmatter keys whose values are plain strings, numbers, dates, booleans, or empty lists never produce edges — only values that actually contain `[[...]]` syntax do.
+
+## Viewing the ontology
+
+Use `smolbren types` to see all note types and their counts:
+
+```bash
+smolbren types
+```
+
+```json
+[
+  {"type":"blog","count":3},
+  {"type":"org","count":1},
+  {"type":"project","count":1}
+]
+```
+
+Use `smolbren edges` to see all edge types and their counts:
+
+```bash
+smolbren edges
+```
+
+```json
+[
+  {"edge_type":"derives_from","count":3},
+  {"edge_type":"for","count":2},
+  {"edge_type":"mentions","count":4}
+]
+```
+
+Both commands return an array sorted by name. Notes without a `type` key are not listed in `smolbren types` but are still fully indexed. Edge counts reflect all edges — both resolved and unresolved — written during the last index run.
+
+## Wikilink resolution
+
+When smolbren encounters a wikilink value like `[[projects/prism]]`, it attempts to resolve it to a note ID in the vault. Resolution matches against the full vault-relative path (without the `.md` extension) and also against bare filenames for short-form links.
+
+If the target note does not exist in the vault, or if a bare filename matches more than one note (ambiguous), the edge is written with `resolved: false`. These edges are still stored and counted — they appear in the `unresolved_edges` field of `smolbren index` output — but they will not participate in graph traversals that expect the target node to exist.
+
+<Note>
+The ontology is rebuilt automatically on every `smolbren index` run. If you rename, add, or remove notes that are wikilink targets, re-index to update edge resolution and type counts.
+</Note>

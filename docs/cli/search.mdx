@@ -1,0 +1,98 @@
+---
+title: "smolbren search — BM25 full-text search over your vault"
+sidebarTitle: "search"
+description: "Run BM25 full-text search over indexed note bodies and titles. Filter by note type and control the number of results with --type and --limit."
+---
+
+The `search` command runs BM25 full-text search over the titles and bodies of all indexed notes and returns a ranked list of results. BM25 scoring accounts for term frequency, inverse document frequency, and document length, so results are ordered by relevance rather than recency or alphabetical position.
+
+## Synopsis
+
+```bash
+smolbren search <query> [--type <type>] [--limit <n>]
+```
+
+## Arguments and flags
+
+<ParamField path="query" type="string" required>
+  The search query. Multi-word queries should be quoted in your shell. Terms are
+  matched against note titles and body text.
+</ParamField>
+
+<ParamField query="--type" type="string">
+  Restrict results to notes whose frontmatter `type` field exactly matches this
+  value. For example, `--type blog` returns only notes with `type: blog` in
+  their frontmatter. Case-sensitive. Use `smolbren types` to discover what type
+  values exist in your vault.
+</ParamField>
+
+<ParamField query="--limit" type="integer" default="10">
+  Maximum number of results to return, ordered by descending BM25 score. Must
+  be a positive integer. Increasing this value does not affect search quality,
+  only how many results are returned.
+</ParamField>
+
+## Output
+
+Returns a JSON array of result objects, sorted by descending `score`. An empty array is returned when no notes match.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Vault-relative note ID (path without `.md` extension), e.g. `blogs/context-engineering` |
+| `path` | string | Vault-relative file path including the `.md` extension, e.g. `blogs/context-engineering.md` |
+| `type` | string \| null | The note's frontmatter `type` value, or `null` if the note has no type |
+| `title` | string | The note's title, derived from the first `# Heading` or the filename |
+| `score` | number | BM25 relevance score. Higher is more relevant. Scores are not normalised to a fixed range and are only meaningful relative to other results in the same query |
+
+## Examples
+
+**Basic search across all note types**
+
+```bash
+smolbren search "context engineering"
+```
+
+```json
+[
+  {
+    "id": "blogs/context-engineering",
+    "path": "blogs/context-engineering.md",
+    "type": "blog",
+    "title": "Context engineering",
+    "score": 12.487
+  },
+  {
+    "id": "blogs/context-platform-engineering",
+    "path": "blogs/context-platform-engineering.md",
+    "type": "blog",
+    "title": "Context platform engineering",
+    "score": 9.031
+  }
+]
+```
+
+**Filter by note type**
+
+```bash
+smolbren search "context engineering" --type blog --limit 3
+```
+
+```json
+[
+  {
+    "id": "blogs/context-engineering",
+    "path": "blogs/context-engineering.md",
+    "type": "blog",
+    "title": "Context engineering",
+    "score": 12.487
+  }
+]
+```
+
+<Note>
+  The vault must be indexed before running `search`. If the index is missing,
+  smolbren exits with code `5` and prints
+  `{"error":"index missing for vault '...' — run smolbren index first","code":"index_missing"}`
+  to stderr. Run `smolbren index` once after registering a vault, and again
+  whenever your notes change.
+</Note>

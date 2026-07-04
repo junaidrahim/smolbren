@@ -1,0 +1,50 @@
+---
+title: "smolbren CLI overview and global flags"
+sidebarTitle: "Overview"
+description: "Overview of all smolbren commands and global flags. Every command outputs single-line JSON to stdout; errors go to stderr with a structured code field."
+---
+
+`smolbren` is an ontology-first hybrid search CLI for Markdown vaults. It combines BM25 full-text search with a Cypher-queryable knowledge graph built from your notes' frontmatter types and wikilink edges. Every subcommand is designed to compose well with other tools — all output is machine-readable JSON that you can pipe directly to `jq`, scripts, or AI agents.
+
+## Global flags
+
+These flags are accepted by every subcommand and must be placed **before** the subcommand name.
+
+<ParamField query="--vault" type="string">
+  The name of the registered vault to operate on. Overrides the configured
+  default vault for this invocation. If omitted and a default vault is
+  configured, the default is used automatically. Use `smolbren vault list` to
+  see registered vault names.
+</ParamField>
+
+<ParamField query="--config" type="path">
+  Path to the smolbren config file. Defaults to `~/.smolbren/config.json`. Use
+  this to maintain multiple independent configurations, for example in CI
+  environments or when running tests against an isolated vault.
+</ParamField>
+
+## Command summary
+
+| Command | Description |
+|---------|-------------|
+| [`vault`](/cli/vault) | Register, list, and remove Markdown vaults |
+| [`index`](/cli/index) | Build or update the search index for a vault |
+| [`search`](/cli/search) | BM25 full-text search over note titles and bodies |
+| [`query`](/cli/query) | Execute Cypher queries over the note knowledge graph |
+| [`get`](/cli/get) | Fetch a single note by ID, optionally including its body |
+| [`links`](/cli/links) | List outgoing wikilink edges from a note |
+| [`backlinks`](/cli/links) | List incoming wikilink edges pointing to a note |
+| [`types`](/cli/types) | List all note types present in the vault with counts |
+| [`edges`](/cli/types) | List all edge relationship types with counts |
+
+## Output contract
+
+**All successful output** is written to **stdout** as a single line of JSON, with no trailing newline except what your terminal adds. The exact shape varies per command and is documented on each command's page.
+
+**All errors** are written to **stderr** as a single-line JSON object and the process exits with a non-zero code:
+
+```json
+{"error": "vault not found: ghost", "code": "vault_not_found"}
+```
+
+The `error` field is a human-readable message. The `code` field is a stable machine-readable identifier. See the [Exit Codes](/cli/exit-codes) page for the full table of codes and their meanings, and the [Output Format](/cli/output-format) page for field-by-field documentation of every command's response shape.

@@ -1,0 +1,128 @@
+---
+title: "smolbren vault — manage your registered vaults"
+sidebarTitle: "vault"
+description: "Register, list, and remove Markdown vaults with smolbren vault add, list, and remove. Vaults are named references to your Markdown directories."
+---
+
+A **vault** is a named reference to a directory of Markdown files on your filesystem. smolbren stores the vault's search index and knowledge graph separately in its data directory (`~/.smolbren/vaults/<name>/`), so your source files are never modified. All commands that operate on notes (`search`, `query`, `get`, `links`, etc.) require at least one vault to be registered and indexed.
+
+## vault add
+
+Register a new vault by giving it a name and pointing it at a directory.
+
+**Synopsis**
+
+```bash
+smolbren vault add <name> <path> [--default]
+```
+
+<ParamField path="name" type="string" required>
+  A short, memorable name for this vault. Used with `--vault` to select it in
+  other commands. Must be unique across all registered vaults.
+</ParamField>
+
+<ParamField path="path" type="path" required>
+  Absolute or relative path to the root directory of your Markdown vault. The
+  path is canonicalized to an absolute path at registration time; the directory
+  must already exist.
+</ParamField>
+
+<ParamField query="--default" type="boolean">
+  Mark this vault as the default. When `--default` is set, subsequent commands
+  that need a vault will use this one automatically without requiring `--vault`.
+  The first vault you add is always made the default regardless of this flag.
+</ParamField>
+
+**Example**
+
+```bash
+smolbren vault add notes ~/Documents/notes --default
+```
+
+```json
+{"name": "notes", "path": "/Users/alice/Documents/notes", "default": true}
+```
+
+The `path` in the response is the canonicalized absolute path. The `default` field reflects whether this vault is now the active default.
+
+---
+
+## vault list
+
+List all registered vaults and their current status.
+
+**Synopsis**
+
+```bash
+smolbren vault list
+```
+
+**Output**
+
+Returns an array of vault objects. Each object contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | The vault's registered name |
+| `path` | string | Absolute path to the vault directory |
+| `default` | boolean | Whether this is the current default vault |
+| `indexed_at_ms` | integer \| null | Unix timestamp (ms) of the last completed index run, or `null` if the vault has never been indexed |
+
+**Example**
+
+```bash
+smolbren vault list
+```
+
+```json
+[
+  {
+    "name": "notes",
+    "path": "/Users/alice/Documents/notes",
+    "default": true,
+    "indexed_at_ms": 1751234567890
+  },
+  {
+    "name": "work",
+    "path": "/Users/alice/work-vault",
+    "default": false,
+    "indexed_at_ms": null
+  }
+]
+```
+
+---
+
+## vault remove
+
+Unregister a vault by name.
+
+**Synopsis**
+
+```bash
+smolbren vault remove <name>
+```
+
+<ParamField path="name" type="string" required>
+  The name of the vault to remove, as it appears in `vault list`.
+</ParamField>
+
+<Warning>
+  `vault remove` **permanently deletes the vault's index data** from
+  `~/.smolbren/vaults/<name>/`, including the notes dataset, edges dataset,
+  and ontology cache. Your source Markdown files are untouched, but you will
+  need to run `smolbren index` again if you re-add the vault. This operation
+  cannot be undone.
+</Warning>
+
+If the removed vault was the default, no default vault is set afterward — you must either add a new vault with `--default` or update your config manually.
+
+**Example**
+
+```bash
+smolbren vault remove work
+```
+
+```json
+{"removed": "work"}
+```

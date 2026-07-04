@@ -1,0 +1,170 @@
+---
+title: "Index and search your Obsidian vault with smolbren"
+sidebarTitle: "Obsidian Setup"
+description: "Register your Obsidian vault with smolbren, build the initial index, and start searching your notes with BM25 and Cypher from the terminal."
+---
+
+smolbren works natively with Obsidian vaults because it understands `[[wikilinks]]` and YAML frontmatter — the two building blocks Obsidian uses to structure a knowledge graph. Every note's `type` field becomes a graph node label, and every frontmatter key whose values contain wikilinks becomes a typed graph edge. No plugins, no exports, no syncing: smolbren reads your vault directly from disk.
+
+<Steps>
+
+  <Step title="Find your vault path">
+    Obsidian shows the full path to your vault in **Settings → About**, under the vault name at the top of the left sidebar.
+
+    Common vault locations:
+
+    | Platform | Example path |
+    |----------|-------------|
+    | macOS (local) | `~/Documents/Notes` |
+    | macOS (iCloud) | `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault` |
+    | Linux | `~/notes` or `~/Documents/Notes` |
+    | Windows | `C:\Users\you\Documents\Notes` |
+
+    Copy the full absolute path — you'll use it in the next step.
+  </Step>
+
+  <Step title="Register the vault">
+    Run `smolbren vault add` with a short name for the vault and its path. Pass `--default` to make it the vault smolbren uses when no `--vault` flag is given:
+
+    ```bash
+    smolbren vault add obsidian ~/path/to/vault --default
+    ```
+
+    smolbren writes the registration to `~/.smolbren/config.json`. You can register multiple vaults and switch between them with `--vault <name>`.
+
+    To see all registered vaults:
+
+    ```bash
+    smolbren vault list
+    ```
+
+    ```json
+    [{"name":"obsidian","path":"/Users/you/Documents/Notes","default":true,"indexed_at_ms":null}]
+    ```
+  </Step>
+
+  <Step title="Build the index">
+    Run `smolbren index` to scan the vault, parse frontmatter and body text, build the BM25 full-text index, resolve wikilink edges, and write the index data to `~/.smolbren/vaults/obsidian/`.
+
+    ```bash
+    smolbren index
+    ```
+
+    ```json
+    {"scanned":9,"unchanged":0,"added":9,"updated":0,"removed":0,"edges":15,"unresolved_edges":0,"duration_ms":90}
+    ```
+
+    | Field | Meaning |
+    |-------|---------|
+    | `scanned` | Markdown files found in the vault |
+    | `added` | Notes written to the index for the first time |
+    | `updated` | Notes re-indexed because their content changed |
+    | `removed` | Notes deleted from the index because the file is gone |
+    | `edges` | Typed wikilink edges resolved and stored |
+    | `unresolved_edges` | Wikilinks that point to a note not yet in the vault |
+    | `duration_ms` | Wall-clock time for the run |
+
+    Subsequent runs are incremental: smolbren compares content hashes and only re-processes changed files, so re-indexing a large vault after a few edits takes a fraction of a second.
+  </Step>
+
+  <Step title="Explore the ontology">
+    After indexing, inspect what smolbren discovered about your vault's structure.
+
+    **Node types** — the unique values of the `type` frontmatter key across all notes:
+
+    ```bash
+    smolbren types
+    ```
+
+    ```json
+    [{"type":"blog","count":3},{"type":"journal","count":2},{"type":"org","count":1},{"type":"project","count":1},{"type":"repo","count":1}]
+    ```
+
+    **Edge types** — the frontmatter keys that contained wikilinks, and how many edges each produced:
+
+    ```bash
+    smolbren edges
+    ```
+
+    ```json
+    [{"edge_type":"about","count":1},{"edge_type":"derives_from","count":3},{"edge_type":"for","count":3},{"edge_type":"mentions","count":6},{"edge_type":"merged_from","count":2}]
+    ```
+
+    These are the labels and relationship types you'll use in Cypher queries. See [Graph Queries](/guides/querying-graph) for patterns.
+  </Step>
+
+</Steps>
+
+## Working with Obsidian frontmatter
+
+Obsidian calls YAML frontmatter "Properties". smolbren treats these properties as the schema of your knowledge graph:
+
+- The `type` key defines the **node label** for that note.
+- Any key whose value is a wikilink (or a list of wikilinks) becomes a **relationship type**, with the host note as the source and the linked note(s) as targets.
+- All other scalar values (`status`, `created`, `url`, etc.) are stored in the `frontmatter` object returned by `smolbren get`.
+
+Here is a realistic blog-post note and what smolbren derives from it:
+
+```markdown
+---
+type: blog
+created: 2026-05-10
+status: draft
+for: "[[orgs/junaid-foo]]"
+mentions:
+  - "[[projects/prism]]"
+  - "[[repos/smolbren]]"
+  - "[[blogs/context-development-lifecycle]]"
+  - "[[blogs/context-platform-engineering]]"
+merged_from:
+  - "[[blogs/context-development-lifecycle]]"
+  - "[[blogs/context-platform-engineering]]"
+derives_from:
+  - "[[Journal/2026, June 01]]"
+  - "[[Journal/2026, June 04]]"
+---
+
+# Context engineering
+
+Draft thesis: prompt engineering changes the instruction; context engineering
+changes the system around the instruction.
+```
+
+From this single note, smolbren creates:
+
+| Derived artefact | Value |
+|-----------------|-------|
+| Node label | `blog` |
+| Edge type `for` | → `orgs/junaid-foo` |
+| Edge type `mentions` | → `projects/prism`, `repos/smolbren`, `blogs/context-development-lifecycle`, `blogs/context-platform-engineering` |
+| Edge type `merged_from` | → `blogs/context-development-lifecycle`, `blogs/context-platform-engineering` |
+| Edge type `derives_from` | → `Journal/2026, June 01`, `Journal/2026, June 04` |
+| Scalar frontmatter | `status: "draft"`, `created: "2026-05-10"` (available via `smolbren get`) |
+
+Notes with no `type` key are still indexed and searchable — they just don't carry a node label and are only reachable via the catch-all `Note` label in Cypher.
+
+## Keeping the index fresh
+
+Run `smolbren index` again after you make changes in Obsidian. Because indexing is incremental, only modified files are re-processed:
+
+```bash
+# edit a few notes in Obsidian, then:
+smolbren index
+# {"scanned":9,"unchanged":8,"updated":1,"added":0,"removed":0,"edges":15,"unresolved_edges":0,"duration_ms":12}
+```
+
+If you want to rebuild the entire index from scratch — for example after renaming many files — pass `--full`:
+
+```bash
+smolbren index --full
+```
+
+There is no background daemon. Run `smolbren index` whenever you want the index to reflect the current state of your vault. Many users add it as a shell alias or a short script that runs before any search or query session.
+
+<Tip>
+  **iCloud and Dropbox vaults** — just use the full path, including any cloud-provider path segments. For example, an iCloud-synced Obsidian vault on macOS lives at `~/Library/Mobile Documents/iCloud~md~obsidian/Documents/MyVault`. Pass that path directly to `smolbren vault add`; smolbren reads files through the local filesystem layer and doesn't need to know about the cloud sync.
+</Tip>
+
+<Note>
+  The `.obsidian/` directory inside your vault — which stores Obsidian's own configuration JSON files — is automatically skipped during indexing. Only `.md` files outside that directory are parsed.
+</Note>
