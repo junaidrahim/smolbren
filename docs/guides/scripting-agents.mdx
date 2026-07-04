@@ -59,8 +59,7 @@ smolbren get blogs/context-engineering --body | jq -r '.body'
 ```
 # Context engineering
 
-Draft thesis: prompt engineering changes the instruction; context engineering
-changes the system around the instruction. ...
+The full markdown body of the note ...
 ```
 
 **Collect all outgoing edges of a note as a plain list:**
@@ -131,7 +130,7 @@ Running it:
 
 ```
 === Context engineering (blog) ===
-Draft thesis: prompt engineering changes the instruction ...
+The full markdown body of the note ...
 
 --- Linked notes ---
 [for]          orgs/junaid-foo — Junaid Foo Org (org)
@@ -160,7 +159,7 @@ smolbren works as a **tool definition** in agent frameworks (LangChain, OpenAI f
 
 | Tool name | CLI command | When to use |
 |-----------|------------|-------------|
-| `search_vault` | `smolbren search <query> [--type <t>] [--limit <n>]` | Keyword or semantic search over titles and bodies |
+| `search_vault` | `smolbren search <query> [--type <t>] [--limit <n>]` | BM25 keyword search over titles and bodies |
 | `query_graph` | `smolbren query <cypher> [--param k=v ...]` | Structured traversal, aggregation, multi-hop reasoning |
 | `get_note` | `smolbren get <id> [--body]` | Retrieve full note content by exact ID |
 | `get_links` | `smolbren links <id> [--type <t>]` | Outgoing edges from a note |
