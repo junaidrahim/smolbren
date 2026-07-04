@@ -2,8 +2,17 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+const BANNER: &str = r"┏━┓┏┳┓┏━┓╻  ┏┓ ┏━┓┏━╸┏┓╻
+┗━┓┃┃┃┃ ┃┃  ┣┻┓┣┳┛┣╸ ┃┗┫
+┗━┛╹ ╹┗━┛┗━╸┗━┛╹┗╸┗━╸╹ ╹";
+
 #[derive(Parser)]
-#[command(name = "smolbren", version, about = "ontology-first search over markdown vaults")]
+#[command(
+    name = "smolbren",
+    version,
+    about = "ontology-first search over markdown vaults",
+    before_help = BANNER
+)]
 pub struct Cli {
     /// Vault name (defaults to the configured default vault)
     #[arg(long, global = true)]
