@@ -12,7 +12,7 @@ description: "smolbren turns your Markdown vault into a queryable knowledge grap
 - **Graph queries via Cypher** — `smolbren query` runs a Cypher statement over the note graph. Every frontmatter `type` becomes a node label; the built-in `Note` label matches every note regardless of type.
 - **Ontology auto-discovery** — after each index run smolbren writes an `ontology.json` file listing every discovered node type and edge type with counts, so agents can introspect the schema without scanning raw files.
 - **Incremental indexing** — `smolbren index` skips files whose modification time and size haven't changed, then content-hashes candidates to skip re-parsing files that were only `touch`-ed. A `--full` flag rebuilds from scratch when needed.
-- **Machine-readable JSON stdout** — every subcommand prints a single-line JSON object or array. Errors go to stderr as `{"error": "...", "code": "..."}`. Exit codes are stable: `0` ok, `1` internal, `3` vault not found, `4` note not found, `5` index missing.
+- **Machine-readable JSON stdout** — every subcommand prints a single-line JSON object or array. Errors go to stderr as `{"error": "...", "code": "..."}`. Exit codes are stable: `0` ok, `1` internal, `2` usage, `3` vault not found, `4` note not found, `5` index missing.
 
 ## Key concepts
 

@@ -59,8 +59,7 @@ smolbren get blogs/context-engineering --body | jq -r '.body'
 ```
 # Context engineering
 
-Draft thesis: prompt engineering changes the instruction; context engineering
-changes the system around the instruction. ...
+The full markdown body of the note ...
 ```
 
 **Collect all outgoing edges of a note as a plain list:**
@@ -131,7 +130,7 @@ Running it:
 
 ```
 === Context engineering (blog) ===
-Draft thesis: prompt engineering changes the instruction ...
+The full markdown body of the note ...
 
 --- Linked notes ---
 [for]          orgs/junaid-foo — Junaid Foo Org (org)
@@ -144,13 +143,23 @@ Draft thesis: prompt engineering changes the instruction ...
 [about] repos/smolbren — smolbren
 ```
 
+## Install the agent skill
+
+smolbren ships a ready-made [Agent Skill](https://agentskills.io) that teaches coding agents the full CLI workflow: the JSON output contract, exit codes, the explore-the-ontology-before-Cypher pattern, note-id semantics, and common gotchas. Install it with the [skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add junaidrahim/smolbren
+```
+
+The skills CLI detects the coding agents on your machine (Claude Code, Cursor, and others) and installs the skill into each one. To install manually instead, copy [`skills/smolbren/SKILL.md`](https://github.com/junaidrahim/smolbren/blob/main/skills/smolbren/SKILL.md) from the repo into your agent's skills directory — for Claude Code that is `~/.claude/skills/smolbren/SKILL.md` (personal) or `.claude/skills/smolbren/SKILL.md` (per-project).
+
 ## AI agent integration
 
 smolbren works as a **tool definition** in agent frameworks (LangChain, OpenAI function calling, Anthropic tool use, custom scaffolding, etc.). Register the CLI commands you need as individual tools. Recommended tool surface:
 
 | Tool name | CLI command | When to use |
 |-----------|------------|-------------|
-| `search_vault` | `smolbren search <query> [--type <t>] [--limit <n>]` | Keyword or semantic search over titles and bodies |
+| `search_vault` | `smolbren search <query> [--type <t>] [--limit <n>]` | BM25 keyword search over titles and bodies |
 | `query_graph` | `smolbren query <cypher> [--param k=v ...]` | Structured traversal, aggregation, multi-hop reasoning |
 | `get_note` | `smolbren get <id> [--body]` | Retrieve full note content by exact ID |
 | `get_links` | `smolbren links <id> [--type <t>]` | Outgoing edges from a note |
