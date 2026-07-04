@@ -8,7 +8,7 @@ env:
   CARGO_TERM_COLOR: always
 
 permissions:
-  contents: write # for tagging published versions
+  contents: write # push release commits/tags, create GitHub releases
 
 jobs:
   test:
@@ -21,47 +21,50 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --all-targets
 
-  publish:
+  release:
     needs: test
     runs-on: ubuntu-latest
-    # never let two pushes race a publish
+    # never let two pushes race a release
     concurrency: crates-publish
     steps:
       - uses: actions/checkout@v4
+        with:
+          # release-plz needs full history and tags to compute the next version
+          fetch-depth: 0
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install release-plz
+        uses: taiki-e/install-action@v2
+        with:
+          tool: release-plz
 
-      # crates.io rejects duplicate versions, so publish only when the
-      # version in Cargo.toml is not on crates.io yet. Pushes without a
-      # version bump run tests and skip the publish step green.
-      - name: Check if version is already published
-        id: check
+      # Bump Cargo.toml/Cargo.lock and CHANGELOG.md from the conventional
+      # commits since the last release, then push the bump back to main.
+      # Pushes made with GITHUB_TOKEN don't trigger workflows, so this
+      # can't loop. Merges with no release-triggering commits (see
+      # release-plz.toml) leave the tree clean and skip the commit.
+      - name: Bump version from conventional commits
         run: |
-          VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -A "smolbren-release-workflow (github.com/junaidrahim/smolbren)" \
-            "https://crates.io/api/v1/crates/smolbren/$VERSION")
-          if [ "$STATUS" = "200" ]; then
-            echo "published=true" >> "$GITHUB_OUTPUT"
-            echo "smolbren $VERSION already on crates.io — skipping publish"
-          else
-            echo "published=false" >> "$GITHUB_OUTPUT"
-            echo "smolbren $VERSION not on crates.io — will publish"
+          release-plz update
+          if ! git diff --quiet; then
+            VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "chore: release v$VERSION"
+            git push origin main
           fi
-
-      - name: Publish to crates.io
-        if: steps.check.outputs.published == 'false'
-        run: cargo publish --locked
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Tag the release
-        if: steps.check.outputs.published == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "v${{ steps.check.outputs.version }}"
-          git push origin "v${{ steps.check.outputs.version }}"
+      # Publishes to crates.io, tags vX.Y.Z, and creates the GitHub release.
+      # Runs unconditionally: it only publishes versions not yet on
+      # crates.io, so a release that previously failed mid-way is picked
+      # up by the next push.
+      - name: Release to crates.io
+        run: release-plz release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
