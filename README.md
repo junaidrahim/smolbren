@@ -68,13 +68,13 @@ smolbren search "ambiguous utopia"     # BM25 full-text search
 smolbren query "MATCH (b:book)-[:themes]->(t:Note) RETURN b.id, t.id"
 ```
 
-Full documentation lives at **[smolbren.mintlify.app](https://smolbren.mintlify.app)**:
-the [quickstart](https://smolbren.mintlify.app/quickstart), core concepts
+Full documentation lives at **[smolbren.com](https://smolbren.com)**:
+the [quickstart](https://smolbren.com/quickstart), core concepts
 (vaults, ontology, indexing, search), guides for
-[Obsidian setup](https://smolbren.mintlify.app/guides/obsidian-setup),
-[querying the graph](https://smolbren.mintlify.app/guides/querying-graph), and
-[scripting & agents](https://smolbren.mintlify.app/guides/scripting-agents), plus the
-complete [CLI reference](https://smolbren.mintlify.app/cli/overview) with every flag,
+[Obsidian setup](https://smolbren.com/guides/obsidian-setup),
+[querying the graph](https://smolbren.com/guides/querying-graph), and
+[scripting & agents](https://smolbren.com/guides/scripting-agents), plus the
+complete [CLI reference](https://smolbren.com/cli/overview) with every flag,
 output shape, and exit code.
 
 ## Agent skill
