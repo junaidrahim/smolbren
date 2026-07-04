@@ -1,6 +1,6 @@
 [package]
 name = "smolbren"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Ontology-first search over markdown vaults: frontmatter types become a queryable graph, with BM25 full-text search on top"
 license = "MIT"
