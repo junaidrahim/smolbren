@@ -25,35 +25,35 @@ Everything starts from a note like this:
 
 ```markdown
 ---
-type: blog
-created: 2026-05-10
-status: draft
-for: "[[orgs/junaid-foo]]"
-mentions: ["[[projects/prism]]", "[[repos/smolbren]]"]
-derives_from: ["[[Journal/2026, June 01]]", "[[Journal/2026, June 04]]"]
+type: book
+status: reading
+started: 2026-06-01
+author: "[[people/ursula-k-le-guin]]"
+themes: ["[[topics/anarchism]]", "[[topics/utopia]]"]
+related: ["[[books/the-left-hand-of-darkness]]"]
 ---
 
-# Context engineering
+# The Dispossessed
 
-Draft thesis: prompt engineering changes the instruction; context engineering
-changes the system around the instruction.
+An ambiguous utopia: two worlds, one wall, and the physicist who tries to
+unbuild it.
 ```
 
 From each file, `smolbren index` derives:
 
-- **id** — the vault-relative path without `.md` (`blogs/context-engineering`).
+- **id** — the vault-relative path without `.md` (`books/the-dispossessed`).
   This is the same shape wikilink targets use, so ids and links line up for free.
-- **type** — the frontmatter `type` key (`blog`). Each type becomes a Cypher node
+- **type** — the frontmatter `type` key (`book`). Each type becomes a Cypher node
   label; `Note` is a catch-all label matching every note, typed or not.
 - **title** — the first `# heading`, falling back to the filename stem.
 - **edges** — every frontmatter key (except `type`) whose string values contain
-  wikilinks becomes an edge type: here `for`, `mentions`, and `derives_from`.
+  wikilinks becomes an edge type: here `author`, `themes`, and `related`.
   Each `[[link]]` is one directed edge, with its list position preserved.
-  Scalar keys like `status` and `created` never become edges — they're kept in the
+  Scalar keys like `status` and `started` never become edges — they're kept in the
   note's `frontmatter` object instead.
 
 Wikilink targets are resolved Obsidian-style: exact id match first, then unique
-basename (`[[prism]]` → `projects/prism` if unambiguous). Aliases
+basename (`[[utopia]]` → `topics/utopia` if unambiguous). Aliases
 (`[[target|alias]]`) are captured and heading/block anchors (`#section`, `^block`)
 are stripped. Ambiguous or missing targets are kept but flagged `resolved: false`
 rather than guessed.
