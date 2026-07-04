@@ -1,0 +1,8 @@
+# Config for release-plz (https://release-plz.dev), which automates
+# version bumps, CHANGELOG.md, crates.io publishing, and GitHub releases
+# from conventional commits. See .github/workflows/release.yml.
+
+[workspace]
+# Only feat/fix/perf commits trigger a release; chore/docs/ci/test/refactor don't.
+# Mark breaking changes as feat!: or fix!: so they match this regex.
+release_commits = "^(feat|fix|perf)"
