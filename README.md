@@ -240,21 +240,18 @@ file), which is also how the test suite isolates itself.
 ## Agent skill
 
 This CLI is designed to be driven by agents, and [`skills/smolbren/SKILL.md`](skills/smolbren/SKILL.md)
-is a ready-made [Agent Skill](https://code.claude.com/docs/en/skills) that teaches an
-agent the output contract, the explore-the-ontology-first workflow, Cypher rules, and
-the common gotchas.
-
-For Claude Code, install it for yourself (available in every project):
+is a ready-made [Agent Skill](https://agentskills.io) that teaches an agent the output
+contract, the explore-the-ontology-first workflow, Cypher rules, and the common
+gotchas. Install it with the [skills CLI](https://github.com/vercel-labs/skills),
+which detects your coding agents (Claude Code, Cursor, …) and installs it into each:
 
 ```sh
-mkdir -p ~/.claude/skills/smolbren
-curl -fsSL https://raw.githubusercontent.com/junaidrahim/smolbren/main/skills/smolbren/SKILL.md \
-  -o ~/.claude/skills/smolbren/SKILL.md
+npx skills add junaidrahim/smolbren
 ```
 
-or drop the same file into a project at `.claude/skills/smolbren/SKILL.md` to share it
-with everyone working in that repo. Any other agent runtime that supports the Agent
-Skills format can load the same file.
+Or install manually by copying the file into your agent's skills directory — for
+Claude Code, `~/.claude/skills/smolbren/SKILL.md` (personal) or
+`.claude/skills/smolbren/SKILL.md` (per-project).
 
 ## Current limitations
 

@@ -1,6 +1,11 @@
 ---
 name: smolbren
 description: Search and traverse the user's markdown/Obsidian vault with the smolbren CLI — graph queries (Cypher), BM25 full-text search, links and backlinks over frontmatter-defined note types. Use when the user asks about their notes, vault, second brain, knowledge base, backlinks, or connections between notes.
+license: MIT
+compatibility: Requires the smolbren CLI on PATH (cargo install smolbren)
+metadata:
+  author: junaidrahim
+  repository: https://github.com/junaidrahim/smolbren
 ---
 
 # smolbren

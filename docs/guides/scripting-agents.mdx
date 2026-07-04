@@ -144,6 +144,16 @@ Draft thesis: prompt engineering changes the instruction ...
 [about] repos/smolbren — smolbren
 ```
 
+## Install the agent skill
+
+smolbren ships a ready-made [Agent Skill](https://agentskills.io) that teaches coding agents the full CLI workflow: the JSON output contract, exit codes, the explore-the-ontology-before-Cypher pattern, note-id semantics, and common gotchas. Install it with the [skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add junaidrahim/smolbren
+```
+
+The skills CLI detects the coding agents on your machine (Claude Code, Cursor, and others) and installs the skill into each one. To install manually instead, copy [`skills/smolbren/SKILL.md`](https://github.com/junaidrahim/smolbren/blob/main/skills/smolbren/SKILL.md) from the repo into your agent's skills directory — for Claude Code that is `~/.claude/skills/smolbren/SKILL.md` (personal) or `.claude/skills/smolbren/SKILL.md` (per-project).
+
 ## AI agent integration
 
 smolbren works as a **tool definition** in agent frameworks (LangChain, OpenAI function calling, Anthropic tool use, custom scaffolding, etc.). Register the CLI commands you need as individual tools. Recommended tool surface:
