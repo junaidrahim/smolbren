@@ -99,6 +99,8 @@ relationship type. Cypher parameters: `--param min=30`.
 ```
 ~/.smolbren/
 ├── config.json          # {"vaults": {"personal": "/path/to/vault"}, "default_vault": "personal"}
+│                        # settings can be overridden per-invocation via SMOLBREN_* env vars,
+│                        # e.g. SMOLBREN_DEFAULT_VAULT=work
 └── vaults/<name>/
     ├── notes.lance      # id, path, type, title, frontmatter_json, body, hashes (FTS + scalar indices)
     ├── edges.lance      # from_id, edge_type, to_id, to_alias, resolved, position
