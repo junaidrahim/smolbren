@@ -1,0 +1,82 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "name": "smolbren",
+  "theme": "luma",
+  "favicon": "https://media.brand.dev/0c924c99-2045-460c-b1bc-1974f1f2ea23.png",
+  "colors": {
+    "primary": "#4462ec",
+    "light": "#9bacf4"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/junaidrahim/smolbren"
+    }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/vaults",
+              "concepts/ontology",
+              "concepts/indexing",
+              "concepts/search"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/obsidian-setup",
+              "guides/querying-graph",
+              "guides/scripting-agents"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/config-file",
+              "configuration/environment-variables"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/overview",
+              "cli/vault",
+              "cli/index",
+              "cli/search",
+              "cli/query",
+              "cli/get",
+              "cli/links",
+              "cli/types"
+            ]
+          },
+          {
+            "group": "Output & Errors",
+            "pages": [
+              "cli/output-format",
+              "cli/exit-codes"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

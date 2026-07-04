@@ -1,0 +1,127 @@
+---
+title: "smolbren links and backlinks — traverse graph edges"
+sidebarTitle: "links"
+description: "Fetch outgoing links (links) and incoming links (backlinks) for any note. Filter by edge type to focus on specific relationship kinds."
+---
+
+smolbren extracts every wikilink from note frontmatter and stores them as typed edges in the index. The `links` command shows which notes a given note points to (outgoing edges), while `backlinks` shows which notes point to it (incoming edges). Both commands support filtering by edge type so you can focus on a specific kind of relationship.
+
+## links
+
+Fetch the outgoing wikilink edges from a note — i.e. the notes that this note references.
+
+**Synopsis**
+
+```bash
+smolbren links <id> [--type <edge_type>]
+```
+
+<ParamField path="id" type="string" required>
+  The vault-relative ID of the source note (path without `.md`). For example,
+  `blogs/context-engineering`. See [Note ID format](/cli/get#note-id-format).
+</ParamField>
+
+<ParamField query="--type" type="string">
+  Filter results to only edges of this relationship type. The edge type is the
+  frontmatter key that contained the wikilink, e.g. `mentions`, `for`,
+  `derives_from`. Use `smolbren edges` to discover what edge types exist in your
+  vault.
+</ParamField>
+
+**Output**
+
+Returns a JSON array of edge objects, sorted by `(edge_type, position)` — i.e. alphabetically by relationship type, then in the order the wikilinks appeared within each frontmatter field.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `edge_type` | string | The frontmatter key that contained this wikilink, e.g. `mentions` |
+| `to_id` | string | The resolved vault-relative ID of the target note. Empty string if the link is unresolved |
+| `to_alias` | string \| null | The display alias from the wikilink, if one was specified with the `\|alias` syntax |
+| `resolved` | boolean | Whether the wikilink target was successfully matched to an indexed note |
+| `position` | integer | Zero-based index of this wikilink within its frontmatter field's list |
+
+**Example**
+
+```bash
+smolbren links blogs/context-engineering --type mentions
+```
+
+```json
+[
+  {"edge_type": "mentions", "to_id": "projects/prism",                           "to_alias": null, "resolved": true, "position": 0},
+  {"edge_type": "mentions", "to_id": "repos/smolbren",                           "to_alias": null, "resolved": true, "position": 1},
+  {"edge_type": "mentions", "to_id": "blogs/context-development-lifecycle",      "to_alias": null, "resolved": true, "position": 2},
+  {"edge_type": "mentions", "to_id": "blogs/context-platform-engineering",       "to_alias": null, "resolved": true, "position": 3}
+]
+```
+
+---
+
+## backlinks
+
+Fetch the incoming wikilink edges pointing to a note — i.e. the notes that reference this note.
+
+**Synopsis**
+
+```bash
+smolbren backlinks <id> [--type <edge_type>]
+```
+
+<ParamField path="id" type="string" required>
+  The vault-relative ID of the target note (path without `.md`).
+</ParamField>
+
+<ParamField query="--type" type="string">
+  Filter results to only incoming edges of this relationship type.
+</ParamField>
+
+**Output**
+
+Returns a JSON array of backlink objects, sorted by `(edge_type, from_id)` — alphabetically by relationship type, then by source note ID. Each object is enriched with the source note's type and title from the notes dataset.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `edge_type` | string | The frontmatter key on the source note that contained the wikilink |
+| `from_id` | string | The vault-relative ID of the source note |
+| `from_type` | string \| null | The `type` field of the source note, or `null` if the source note has no type |
+| `from_title` | string | The title of the source note |
+
+**Example**
+
+```bash
+smolbren backlinks projects/prism
+```
+
+```json
+[
+  {
+    "edge_type": "for",
+    "from_id": "blogs/context-engineering",
+    "from_type": "blog",
+    "from_title": "Context engineering"
+  },
+  {
+    "edge_type": "mentions",
+    "from_id": "blogs/context-engineering",
+    "from_type": "blog",
+    "from_title": "Context engineering"
+  },
+  {
+    "edge_type": "mentions",
+    "from_id": "Journal/2026, June 01",
+    "from_type": null,
+    "from_title": "2026, June 01"
+  }
+]
+```
+
+---
+
+<Note>
+  An edge with `"resolved": false` means the wikilink target recorded in
+  `to_id` could not be matched to any indexed note at the time of the last
+  `smolbren index` run. This can happen when a note is referenced before it
+  exists, or when it is deleted. After adding or renaming the target note, run
+  `smolbren index` to re-resolve the link. Run `smolbren index --full` to
+  recompute all edge resolutions across the entire vault.
+</Note>

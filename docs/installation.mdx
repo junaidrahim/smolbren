@@ -1,0 +1,144 @@
+---
+title: "Install smolbren: prerequisites, cargo install, first run"
+sidebarTitle: "Installation"
+description: "Install smolbren via Cargo, satisfy the Rust toolchain and protoc prerequisites, and confirm the binary is ready to use on your machine."
+---
+
+smolbren is distributed as a Rust crate and installed with `cargo install`. There is no pre-built binary to download — the build compiles directly on your machine from source, which means you need a couple of prerequisites in place before running the install command.
+
+## Prerequisites
+
+### Rust toolchain (1.85+, edition 2024)
+
+smolbren requires Rust **1.85 or later** (it uses the [2024 edition](https://doc.rust-lang.org/edition-guide/rust-2024/)). The easiest way to install and manage Rust is [rustup](https://rustup.rs/):
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+If you already have Rust installed, make sure it's up to date:
+
+```sh
+rustup update stable
+rustc --version   # should be 1.85.0 or later
+```
+
+### protoc (Protocol Buffers compiler)
+
+smolbren uses [Lance](https://lancedb.github.io/lance/) for columnar storage. Lance compiles protobuf definitions at build time, so **`protoc` must be available on your `PATH` before you run `cargo install`**.
+
+<Warning>
+  If `protoc` is not installed, the build will fail with an error like
+  `Could not find `protoc`. If `protoc` is installed, try setting the
+  `PROTOC` environment variable to the path of the `protoc` binary`.
+  Install `protoc` first using the instructions below, then re-run
+  `cargo install smolbren`.
+</Warning>
+
+**macOS** (via [Homebrew](https://brew.sh/)):
+
+```sh
+brew install protobuf
+```
+
+**Debian / Ubuntu Linux**:
+
+```sh
+sudo apt-get update && sudo apt-get install -y protobuf-compiler
+```
+
+**Other Linux distributions** — install the `protobuf-compiler` package (or equivalent) via your system package manager, or download a release binary from the [protobuf releases page](https://github.com/protocolbuffers/protobuf/releases).
+
+After installation, confirm `protoc` is on your `PATH`:
+
+```sh
+protoc --version   # e.g. libprotoc 28.3
+```
+
+## Install
+
+With Rust and `protoc` in place, install smolbren from [crates.io](https://crates.io/crates/smolbren):
+
+```sh
+cargo install smolbren
+```
+
+Cargo will compile the crate and its dependencies and place the `smolbren` binary in `~/.cargo/bin/`. If that directory isn't already on your `PATH`, add it:
+
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+## Verify
+
+Check that the binary is reachable and working:
+
+```sh
+smolbren --version
+```
+
+```
+smolbren 0.1.0
+```
+
+For a full list of subcommands and global flags:
+
+```sh
+smolbren --help
+```
+
+```
+ontology-first search over markdown vaults
+
+Usage: smolbren [OPTIONS] <COMMAND>
+
+Commands:
+  vault      Manage vaults
+  index      Index the vault (incremental by default)
+  search     BM25 full-text search over note titles and bodies
+  query      Run a Cypher query over the note graph
+  get        Fetch one note by id
+  links      Outgoing edges of a note
+  backlinks  Incoming edges of a note
+  types      List note types with counts
+  edges      List edge types with counts
+  help       Print this message or the help of the given subcommand(s)
+
+Options:
+      --vault <VAULT>    Vault name (defaults to the configured default vault)
+      --config <CONFIG>  Config file path (default: ~/.smolbren/config.json)
+  -h, --help             Print help
+  -V, --version          Print version
+```
+
+## Updating
+
+To update to the latest published version, re-run the same install command — Cargo will replace the existing binary:
+
+```sh
+cargo install smolbren
+```
+
+To install a specific version:
+
+```sh
+cargo install smolbren --version 0.1.0
+```
+
+<Note>
+  smolbren stores all of its data — the config file, vault index datasets, and
+  ontology snapshots — under **`~/.smolbren/`** by default. The layout is:
+
+  ```
+  ~/.smolbren/
+  ├── config.json              # registered vaults and default vault name
+  └── vaults/
+      └── <name>/
+          ├── notes.lance      # BM25 + scalar indices over note metadata and body
+          ├── edges.lance      # typed graph edges derived from wikilink frontmatter
+          └── ontology.json    # discovered types and edge types with counts
+  ```
+
+  You can override the config path per-invocation with `--config`, or set the
+  `SMOLBREN_DEFAULT_VAULT` environment variable to switch vaults without a flag.
+</Note>

@@ -1,0 +1,243 @@
+---
+title: "Traverse your vault knowledge graph with Cypher queries"
+sidebarTitle: "Graph Queries"
+description: "Use Cypher queries to traverse the typed edge graph built from your vault's frontmatter wikilinks. Includes patterns for common knowledge-graph lookups."
+---
+
+After indexing, smolbren builds a directed property graph from your vault: note types (the `type` frontmatter key) become node labels, and frontmatter keys that contain wikilinks become relationship types. The node ID is the note's vault-relative path without the `.md` extension — for example, `blogs/context-engineering`. You query this graph with Cypher, the same query language used by Neo4j and other graph databases.
+
+Every `smolbren query` call prints a single line of JSON to stdout:
+
+```json
+{"columns":["b.id","n.title"],"rows":[{"b.id":"blogs/context-engineering","n.title":"Context engineering"}]}
+```
+
+## Discover your schema first
+
+Before writing queries, inspect what node labels and relationship types exist in your vault.
+
+**List node types and counts:**
+
+```bash
+smolbren types
+```
+
+```json
+[
+  {"type":"blog","count":3},
+  {"type":"journal","count":2},
+  {"type":"org","count":1},
+  {"type":"project","count":1},
+  {"type":"repo","count":1}
+]
+```
+
+**List relationship types and counts:**
+
+```bash
+smolbren edges
+```
+
+```json
+[
+  {"edge_type":"about","count":1},
+  {"edge_type":"derives_from","count":3},
+  {"edge_type":"for","count":3},
+  {"edge_type":"mentions","count":6},
+  {"edge_type":"merged_from","count":2}
+]
+```
+
+These names are what you put inside `(:NodeLabel)` and `-[:EDGE_TYPE]->` in your Cypher queries.
+
+## Basic patterns
+
+<AccordionGroup>
+
+  <Accordion title="Find all nodes of a type">
+    Match every note with a given node label and return their IDs and titles.
+
+    ```bash
+    smolbren query "MATCH (n:blog) RETURN n.id, n.title"
+    ```
+
+    ```json
+    {
+      "columns": ["n.id", "n.title"],
+      "rows": [
+        {"n.id": "blogs/context-engineering",           "n.title": "Context engineering"},
+        {"n.id": "blogs/context-development-lifecycle", "n.title": "Context development lifecycle"},
+        {"n.id": "blogs/context-platform-engineering",  "n.title": "Context platform engineering"}
+      ]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Traverse a relationship">
+    Follow a specific edge type from a source label to any target. This returns every blog note and the notes it `mentions`:
+
+    ```bash
+    smolbren query "MATCH (b:blog)-[:mentions]->(r) RETURN b.title, r.title"
+    ```
+
+    ```json
+    {
+      "columns": ["b.title", "r.title"],
+      "rows": [
+        {"b.title": "Context engineering", "r.title": "Prism"},
+        {"b.title": "Context engineering", "r.title": "smolbren"},
+        {"b.title": "Context engineering", "r.title": "Context development lifecycle"},
+        {"b.title": "Context engineering", "r.title": "Context platform engineering"}
+      ]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Find all neighbors of a specific note">
+    Use a `$`-prefixed parameter to target a single note by ID. Pass the parameter with `--param`:
+
+    ```bash
+    smolbren query \
+      "MATCH (n)-[r]->(m) WHERE n.id = \$id RETURN type(r), m.id, m.title" \
+      --param id=blogs/context-engineering
+    ```
+
+    ```json
+    {
+      "columns": ["type(r)", "m.id", "m.title"],
+      "rows": [
+        {"type(r)": "for",          "m.id": "orgs/junaid-foo",                    "m.title": "Junaid Foo Org"},
+        {"type(r)": "mentions",     "m.id": "projects/prism",                     "m.title": "Prism"},
+        {"type(r)": "mentions",     "m.id": "repos/smolbren",                     "m.title": "smolbren"},
+        {"type(r)": "mentions",     "m.id": "blogs/context-development-lifecycle", "m.title": "Context development lifecycle"},
+        {"type(r)": "mentions",     "m.id": "blogs/context-platform-engineering",  "m.title": "Context platform engineering"},
+        {"type(r)": "merged_from",  "m.id": "blogs/context-development-lifecycle", "m.title": "Context development lifecycle"},
+        {"type(r)": "merged_from",  "m.id": "blogs/context-platform-engineering",  "m.title": "Context platform engineering"},
+        {"type(r)": "derives_from", "m.id": "Journal/2026, June 01",               "m.title": null},
+        {"type(r)": "derives_from", "m.id": "Journal/2026, June 04",               "m.title": null}
+      ]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Count relationships by type">
+    Aggregate to find the most-mentioned notes across all blogs:
+
+    ```bash
+    smolbren query \
+      "MATCH (n:blog)-[r:mentions]->(m) RETURN m.id, m.title, count(r) AS mentions ORDER BY mentions DESC"
+    ```
+
+    ```json
+    {
+      "columns": ["m.id", "m.title", "mentions"],
+      "rows": [
+        {"m.id": "projects/prism",                        "m.title": "Prism",                        "mentions": 3},
+        {"m.id": "repos/smolbren",                        "m.title": "smolbren",                     "mentions": 2},
+        {"m.id": "blogs/context-development-lifecycle",   "m.title": "Context development lifecycle", "mentions": 1}
+      ]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Filter across multiple types with Note">
+    `Note` is a catch-all label that matches every note in the vault, regardless of its `type` value. Use it to query across multiple types or when you don't know the exact label:
+
+    ```bash
+    smolbren query \
+      "MATCH (n:Note) WHERE n.type IN ['blog','journal'] RETURN n.id, n.title, n.type"
+    ```
+
+    ```json
+    {
+      "columns": ["n.id", "n.title", "n.type"],
+      "rows": [
+        {"n.id": "blogs/context-engineering",           "n.title": "Context engineering",           "n.type": "blog"},
+        {"n.id": "blogs/context-development-lifecycle", "n.title": "Context development lifecycle",  "n.type": "blog"},
+        {"n.id": "blogs/context-platform-engineering",  "n.title": "Context platform engineering",   "n.type": "blog"},
+        {"n.id": "Journal/2026, June 01",               "n.title": null,                             "n.type": "journal"},
+        {"n.id": "Journal/2026, June 04",               "n.title": null,                             "n.type": "journal"}
+      ]
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Cross-label traversal">
+    Traverse from one specific label to any note (using `Note`) along a known relationship type. This returns every blog that was merged from another blog:
+
+    ```bash
+    smolbren query \
+      "MATCH (b:blog)-[:merged_from]->(x:Note) RETURN b.id, x.id"
+    ```
+
+    ```json
+    {
+      "columns": ["b.id", "x.id"],
+      "rows": [
+        {"b.id": "blogs/context-engineering", "x.id": "blogs/context-development-lifecycle"},
+        {"b.id": "blogs/context-engineering", "x.id": "blogs/context-platform-engineering"}
+      ]
+    }
+    ```
+  </Accordion>
+
+</AccordionGroup>
+
+## Using parameters
+
+Pass runtime values into queries with `--param key=value`. The flag is repeatable:
+
+```bash
+smolbren query \
+  "MATCH (n:blog)-[r:mentions]->(m) RETURN m.id, count(r) AS c ORDER BY c DESC LIMIT \$limit" \
+  --param limit=5
+```
+
+smolbren **JSON-parses the value first**, so:
+
+| `--param` value | Cypher type |
+|----------------|-------------|
+| `--param limit=10` | integer `10` |
+| `--param active=true` | boolean `true` |
+| `--param id=blogs/context-engineering` | string `"blogs/context-engineering"` |
+| `--param tags=["a","b"]` | JSON array |
+
+If JSON parsing fails, the value is passed as a plain string. This means you almost never need to add quotes — just write `--param id=blogs/context-engineering`, not `--param id='"blogs/context-engineering"'`.
+
+## Output format
+
+Every `smolbren query` result has the same shape:
+
+```json
+{
+  "columns": ["b.id", "n.title", "mentions"],
+  "rows": [
+    {"b.id": "blogs/context-engineering",          "n.title": "Context engineering",          "mentions": 4},
+    {"b.id": "blogs/context-platform-engineering", "n.title": "Context platform engineering", "mentions": 2}
+  ]
+}
+```
+
+- **`columns`** — ordered array of projection names, matching the aliases or expressions in your `RETURN` clause.
+- **`rows`** — array of row objects. Each object's keys are the column names from `columns`, and values are the corresponding projected values.
+
+To reshape this in `jq`:
+
+```bash
+smolbren query "MATCH (n:blog) RETURN n.id, n.title" \
+  | jq '.rows[] | {id: .["n.id"], title: .["n.title"]}'
+```
+
+```json
+{"id": "blogs/context-engineering", "title": "Context engineering"}
+{"id": "blogs/context-development-lifecycle", "title": "Context development lifecycle"}
+{"id": "blogs/context-platform-engineering", "title": "Context platform engineering"}
+```
+
+<Note>
+  **`Note` is a catch-all label** that matches every note in the vault — typed or not. Use `(n:Note)` when you want to reach nodes of any type or when the target label of a relationship is unknown. It is always registered automatically, even if no note has `type: Note` in its frontmatter.
+</Note>
+
+<Warning>
+  **Body text and raw frontmatter JSON are not projected in query results.** The graph engine loads only `id`, `path`, `type`, and `title` per node for performance. If you need the body or arbitrary frontmatter scalars like `status`, use `smolbren get <id>` (or `smolbren get <id> --body`) to fetch the full note record after your query identifies the relevant IDs.
+</Warning>

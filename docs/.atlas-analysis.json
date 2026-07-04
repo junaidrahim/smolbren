@@ -1,0 +1,100 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "smolbren",
+  "projectDescription": "A local CLI tool for ontology-first, hybrid search over Markdown vaults — frontmatter types and wikilinks become a queryable graph with BM25 full-text search.",
+  "theme": "luma",
+  "primaryColor": "#4462ec",
+  "lightColor": "#9bacf4",
+  "darkColor": null,
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/vaults",
+              "concepts/ontology",
+              "concepts/indexing",
+              "concepts/search"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/obsidian-setup",
+              "guides/querying-graph",
+              "guides/scripting-agents"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/config-file",
+              "configuration/environment-variables"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "groups": [
+          {
+            "group": "Commands",
+            "pages": [
+              "cli/overview",
+              "cli/vault",
+              "cli/index",
+              "cli/search",
+              "cli/query",
+              "cli/get",
+              "cli/links",
+              "cli/types"
+            ]
+          },
+          {
+            "group": "Output & Errors",
+            "pages": [
+              "cli/output-format",
+              "cli/exit-codes"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Ontology-first indexing: frontmatter `type` keys become graph node labels",
+    "Wikilink edges: frontmatter keys containing [[wikilinks]] become typed graph edges",
+    "BM25 full-text search with optional type filter",
+    "Cypher query language over the knowledge graph",
+    "Incremental indexing using mtime/size pre-filter and blake3 content hashes",
+    "Machine-readable JSON stdout and structured exit codes — designed for agents and scripts",
+    "Fully local storage using Lance columnar format — no server required",
+    "Works with any Markdown vault, first-class Obsidian support"
+  ],
+  "publicApiSurface": [
+    "smolbren vault add <name> <path> [--default]",
+    "smolbren vault list",
+    "smolbren vault remove <name>",
+    "smolbren index [--full] [--vault <name>]",
+    "smolbren search <query> [--type <type>] [--limit <n>]",
+    "smolbren query <cypher> [--param key=value ...]",
+    "smolbren get <id> [--body]",
+    "smolbren links <id> [--type <type>]",
+    "smolbren backlinks <id> [--type <type>]",
+    "smolbren types",
+    "smolbren edges",
+    "~/.smolbren/config.json",
+    "SMOLBREN_* environment variables"
+  ]
+}

@@ -1,0 +1,245 @@
+---
+title: "Use smolbren in shell scripts and AI agent pipelines"
+sidebarTitle: "Scripting & Agents"
+description: "Automate smolbren from scripts and AI agents: every command prints single-line JSON, uses structured exit codes, and pipes cleanly into jq."
+---
+
+smolbren's JSON-first design makes it a natural tool for shell scripts, automation pipelines, and AI agent tool calls. There is no interactive mode, no pager, no colour codes — every command is a pure function that reads your vault and writes machine-readable output.
+
+## JSON stdout contract
+
+Every successful command prints **exactly one line of JSON** to stdout and exits `0`.
+
+```
+smolbren search "context engineering"
+{"id":"blogs/context-engineering","path":"blogs/context-engineering.md","type":"blog","title":"Context engineering","score":3.4721}
+```
+
+When a command fails, smolbren prints a JSON error object to **stderr** and exits with a non-zero code:
+
+```json
+{"error":"note not found: nope/missing","code":"note_not_found"}
+```
+
+The `code` field is a stable machine-readable string (see [Exit codes](#exit-codes-for-error-handling) below). Scripts should check both the exit code and `stderr` — never rely on parsing the error message text, which may change between versions.
+
+## Composing with jq
+
+Because stdout is always valid JSON, you can pipe directly into `jq` with no intermediate parsing step.
+
+**Extract IDs from a search:**
+
+```bash
+smolbren search "agent" | jq '.[] | .id'
+```
+
+```
+"blogs/context-engineering"
+"repos/smolbren"
+```
+
+**Reshape graph query results into objects:**
+
+```bash
+smolbren query "MATCH (n:blog) RETURN n.id, n.title" \
+  | jq '.rows[] | {id: .["n.id"], title: .["n.title"]}'
+```
+
+```json
+{"id": "blogs/context-engineering", "title": "Context engineering"}
+{"id": "blogs/context-development-lifecycle", "title": "Context development lifecycle"}
+```
+
+**Get a note's body text:**
+
+```bash
+smolbren get blogs/context-engineering --body | jq -r '.body'
+```
+
+```
+# Context engineering
+
+Draft thesis: prompt engineering changes the instruction; context engineering
+changes the system around the instruction. ...
+```
+
+**Collect all outgoing edges of a note as a plain list:**
+
+```bash
+smolbren links blogs/context-engineering \
+  | jq '[.[] | {type: .edge_type, target: .to_id}]'
+```
+
+**Get all backlinks and filter to a specific edge type:**
+
+```bash
+smolbren backlinks projects/prism \
+  | jq '[.[] | select(.edge_type == "mentions") | .from_id]'
+```
+
+## Shell script example
+
+The following script gathers rich context for a given note: it fetches the note's metadata, resolves one level of outgoing links, and prints a compact context block suitable for inclusion in an LLM prompt.
+
+```bash
+#!/usr/bin/env bash
+# gather-context.sh <note-id>
+# Usage: ./gather-context.sh blogs/context-engineering
+set -euo pipefail
+
+NOTE_ID="${1:?Usage: $0 <note-id>}"
+
+# 1. Make sure the index is fresh.
+smolbren index > /dev/null
+
+# 2. Fetch the root note (with body).
+NOTE=$(smolbren get "$NOTE_ID" --body)
+TITLE=$(echo "$NOTE" | jq -r '.title')
+TYPE=$(echo  "$NOTE" | jq -r '.type')
+BODY=$(echo  "$NOTE" | jq -r '.body')
+
+echo "=== $TITLE ($TYPE) ==="
+echo "$BODY"
+echo ""
+
+# 3. Resolve all outgoing links and print a summary of each target.
+echo "--- Linked notes ---"
+smolbren links "$NOTE_ID" | jq -c '.[]' | while read -r edge; do
+  EDGE_TYPE=$(echo "$edge" | jq -r '.edge_type')
+  TARGET_ID=$(echo "$edge" | jq -r '.to_id')
+
+  # Fetch the target (no body for brevity).
+  TARGET=$(smolbren get "$TARGET_ID" 2>/dev/null) || continue
+  TARGET_TITLE=$(echo "$TARGET" | jq -r '.title // .id')
+  TARGET_TYPE=$(echo  "$TARGET" | jq -r '.type  // "untyped"')
+
+  echo "[$EDGE_TYPE] $TARGET_ID — $TARGET_TITLE ($TARGET_TYPE)"
+done
+
+# 4. Show what links back to this note.
+echo ""
+echo "--- Backlinks ---"
+smolbren backlinks "$NOTE_ID" \
+  | jq -r '.[] | "[\(.edge_type)] \(.from_id) — \(.from_title // .from_id)"'
+```
+
+Running it:
+
+```bash
+./gather-context.sh blogs/context-engineering
+```
+
+```
+=== Context engineering (blog) ===
+Draft thesis: prompt engineering changes the instruction ...
+
+--- Linked notes ---
+[for]          orgs/junaid-foo — Junaid Foo Org (org)
+[mentions]     projects/prism — Prism (project)
+[mentions]     repos/smolbren — smolbren (repo)
+[merged_from]  blogs/context-development-lifecycle — Context development lifecycle (blog)
+[derives_from] Journal/2026, June 01 — Journal/2026, June 01 (journal)
+
+--- Backlinks ---
+[about] repos/smolbren — smolbren
+```
+
+## AI agent integration
+
+smolbren works as a **tool definition** in agent frameworks (LangChain, OpenAI function calling, Anthropic tool use, custom scaffolding, etc.). Register the CLI commands you need as individual tools. Recommended tool surface:
+
+| Tool name | CLI command | When to use |
+|-----------|------------|-------------|
+| `search_vault` | `smolbren search <query> [--type <t>] [--limit <n>]` | Keyword or semantic search over titles and bodies |
+| `query_graph` | `smolbren query <cypher> [--param k=v ...]` | Structured traversal, aggregation, multi-hop reasoning |
+| `get_note` | `smolbren get <id> [--body]` | Retrieve full note content by exact ID |
+| `get_links` | `smolbren links <id> [--type <t>]` | Outgoing edges from a note |
+| `get_backlinks` | `smolbren backlinks <id> [--type <t>]` | Incoming edges to a note |
+
+Below is a conceptual tool definition in generic JSON schema format, suitable for adaptation to any framework:
+
+```json
+{
+  "name": "search_vault",
+  "description": "BM25 full-text search over note titles and bodies. Returns a ranked list of matching notes with id, type, title, and score.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "query": {
+        "type": "string",
+        "description": "Search terms. Supports BM25 keyword matching."
+      },
+      "type": {
+        "type": "string",
+        "description": "Restrict results to this note type (e.g. 'blog', 'project'). Omit to search all types."
+      },
+      "limit": {
+        "type": "integer",
+        "description": "Maximum number of results to return. Default 10.",
+        "default": 10
+      }
+    },
+    "required": ["query"]
+  }
+}
+```
+
+```json
+{
+  "name": "query_graph",
+  "description": "Run a Cypher query over the vault's typed edge graph. Node labels come from the 'type' frontmatter key; relationship types come from frontmatter keys containing wikilinks. Returns {columns, rows}.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "cypher": {
+        "type": "string",
+        "description": "A Cypher MATCH ... RETURN query. Use $param_name placeholders for dynamic values."
+      },
+      "params": {
+        "type": "object",
+        "description": "Key-value pairs substituted for $param_name placeholders in the query. Values are JSON-typed.",
+        "additionalProperties": true
+      }
+    },
+    "required": ["cypher"]
+  }
+}
+```
+
+When the agent receives a tool result it can immediately pipe it through further tool calls — for example, running `search_vault` to find candidate IDs, then `query_graph` to traverse their relationships, then `get_note` with `--body` to load the full text of the most relevant result.
+
+## Exit codes for error handling
+
+Scripts should check the exit code before attempting to parse stdout. smolbren uses a fixed set of non-overlapping codes:
+
+| Code | Meaning | `code` string in stderr JSON |
+|------|---------|------------------------------|
+| `0` | Success | — |
+| `1` | Internal / unexpected error | `"internal"` |
+| `2` | Usage / argument error | — |
+| `3` | Vault not found or no default vault configured | `"vault_not_found"` |
+| `4` | Note not found | `"note_not_found"` |
+| `5` | Index missing — vault registered but never indexed | `"index_missing"` |
+
+Example defensive pattern:
+
+```bash
+result=$(smolbren get "$NOTE_ID" 2>/tmp/smolbren_err)
+code=$?
+if [ $code -ne 0 ]; then
+  error_code=$(jq -r '.code' /tmp/smolbren_err)
+  case "$error_code" in
+    note_not_found) echo "Note '$NOTE_ID' does not exist." ;;
+    index_missing)  echo "Run 'smolbren index' first." ;;
+    vault_not_found) echo "No vault registered. Run 'smolbren vault add'." ;;
+    *) echo "Unexpected error (code $code): $(cat /tmp/smolbren_err)" ;;
+  esac
+  exit $code
+fi
+```
+
+For a complete reference, see the [Exit Codes](/cli/exit-codes) page.
+
+<Tip>
+  Run `smolbren index` at the start of any script or agent session that will perform searches or queries. The incremental indexer finishes in milliseconds when nothing has changed, so it is safe to call unconditionally — and it guarantees your results reflect the current state of the vault.
+</Tip>

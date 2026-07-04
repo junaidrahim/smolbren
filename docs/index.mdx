@@ -1,0 +1,50 @@
+---
+title: "smolbren: local hybrid search for your Markdown vaults"
+sidebarTitle: "Home"
+description: "smolbren indexes your Markdown notes into a queryable knowledge graph with BM25 full-text search. Fully local, agent-ready JSON output."
+---
+
+Welcome to **smolbren** — an ontology-first, hybrid search CLI for Markdown vaults. It turns your frontmatter into a typed knowledge graph, layers BM25 full-text search on top, and exposes everything through single-line JSON output that agents and scripts can consume directly. No server, no cloud, no configuration sprawl — just your notes and a fast local index.
+
+<CardGroup cols={2}>
+  <Card title="Introduction" icon="book-open" href="/introduction">
+    Understand what smolbren does, how its core concepts fit together, and which workflows it's built for.
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Install smolbren, register your vault, build the index, and run your first search in under five minutes.
+  </Card>
+  <Card title="Ontology" icon="diagram-project" href="/concepts/ontology">
+    Learn how frontmatter `type` keys and wikilink-valued fields become graph node labels and typed edges.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Full reference for every smolbren subcommand, flag, and exit code.
+  </Card>
+</CardGroup>
+
+## Get started in three steps
+
+<Steps>
+  <Step title="Install smolbren">
+    Make sure you have the [Rust toolchain](https://rustup.rs/) and `protoc` on your `PATH`, then install from crates.io:
+
+    ```sh
+    cargo install smolbren
+    ```
+  </Step>
+  <Step title="Register your vault">
+    Point smolbren at your Markdown directory. The first vault you add automatically becomes the default:
+
+    ```sh
+    smolbren vault add personal ~/notes --default
+    ```
+  </Step>
+  <Step title="Index and search">
+    Build the index (incremental by default — only changed files are re-read), then start querying:
+
+    ```sh
+    smolbren index
+    smolbren search "context engineering"
+    smolbren query "MATCH (n:blog) RETURN n.title LIMIT 5"
+    ```
+  </Step>
+</Steps>

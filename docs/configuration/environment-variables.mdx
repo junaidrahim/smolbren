@@ -1,0 +1,61 @@
+---
+title: "Environment variables for smolbren"
+sidebarTitle: "Environment Variables"
+description: "Override smolbren configuration with SMOLBREN_* environment variables. Useful for CI, containers, and multi-vault scripting workflows."
+---
+
+Environment variables override values in `config.json` without modifying the file. This makes them ideal for CI pipelines, containers, and multi-vault scripting — you can point smolbren at a different vault for a single command without touching your persistent configuration.
+
+## Available variables
+
+<ParamField query="SMOLBREN_DEFAULT_VAULT" type="string">
+  Overrides the `default_vault` field in `config.json`. Sets which vault is used when `--vault` is not passed on the command line. The value must match a vault name already registered under `vaults` in your config file.
+
+  ```bash
+  SMOLBREN_DEFAULT_VAULT=work smolbren search "standup"
+  ```
+</ParamField>
+
+## Priority order
+
+When smolbren resolves a configuration value, it applies sources in this order — later sources win:
+
+```
+built-in defaults  <  config.json  <  SMOLBREN_* environment variables
+```
+
+Environment variables always take precedence over the file. The config file always takes precedence over built-in defaults. The `--vault` and `--config` CLI flags are applied after all of the above.
+
+## Examples
+
+**CI pipeline — use a dedicated CI vault without altering the shared config file:**
+
+```bash
+SMOLBREN_DEFAULT_VAULT=ci-vault smolbren index
+SMOLBREN_DEFAULT_VAULT=ci-vault smolbren search "deployment checklist"
+```
+
+**Switch default vault for a single interactive session:**
+
+```bash
+export SMOLBREN_DEFAULT_VAULT=work
+smolbren search "quarterly review"
+smolbren search "roadmap"
+```
+
+**Override the config file location and the default vault together:**
+
+```bash
+smolbren --config /etc/smolbren/config.json \
+  --vault work \
+  search "roadmap"
+```
+
+<Tip>
+  For per-project vault switching, put your `SMOLBREN_*` variables in a `.env` file at the project root and load them automatically with [direnv](https://direnv.net/) (via a `.envrc` that calls `dotenv`). This keeps vault bindings close to your project without polluting your shell profile.
+
+  ```bash
+  # .env (project root)
+  SMOLBREN_DEFAULT_VAULT=myproject
+  ```
+</Tip>

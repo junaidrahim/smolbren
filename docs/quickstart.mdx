@@ -1,0 +1,138 @@
+---
+title: "Get started with smolbren: index and search your vault"
+sidebarTitle: "Quickstart"
+description: "Install smolbren, register your vault, build the index, and run your first search and Cypher graph query in well under five minutes."
+---
+
+smolbren is a single binary with no runtime dependencies beyond its own index files. Once it's installed you register a vault, run one command to build the index, and immediately have BM25 full-text search and Cypher graph queries over your notes.
+
+<Note>
+  All smolbren output is single-line JSON written to stdout. Pipe to `jq` for
+  human-readable formatting: `smolbren search "rust async" | jq`.
+</Note>
+
+<Steps>
+  <Step title="Install">
+    smolbren is distributed as a Rust crate. You need the [Rust toolchain](https://rustup.rs/) (edition 2024, rustc 1.85+) and `protoc` on your `PATH` before running `cargo install` — see the [Installation guide](/installation) for full prerequisites.
+
+    ```sh
+    cargo install smolbren
+    ```
+
+    Confirm the binary is available:
+
+    ```sh
+    smolbren --version
+    ```
+  </Step>
+
+  <Step title="Register your vault">
+    Tell smolbren where your Markdown files live by registering the directory as a named vault. The `--default` flag makes it the vault used by all subsequent commands. If this is the first vault you register it becomes the default automatically.
+
+    ```sh
+    smolbren vault add personal ~/path/to/vault --default
+    ```
+
+    You'll get a JSON confirmation:
+
+    ```json
+    {"name":"personal","path":"/home/you/path/to/vault","default":true}
+    ```
+
+    List all registered vaults at any time:
+
+    ```sh
+    smolbren vault list
+    ```
+  </Step>
+
+  <Step title="Build the index">
+    Index your vault. The first run scans every `.md` file; subsequent runs are incremental — smolbren compares modification times, file sizes, and content hashes to skip unchanged files.
+
+    ```sh
+    smolbren index
+    ```
+
+    smolbren prints an `IndexStats` object when it finishes:
+
+    ```json
+    {"scanned":9,"unchanged":0,"added":9,"updated":0,"removed":0,"edges":15,"unresolved_edges":3,"duration_ms":42}
+    ```
+
+    | Field | Description |
+    |---|---|
+    | `scanned` | Total `.md` files found in the vault |
+    | `unchanged` | Files skipped because mtime/size and content hash matched |
+    | `added` | New notes inserted into the index |
+    | `updated` | Existing notes whose content changed |
+    | `removed` | Notes deleted from disk and removed from the index |
+    | `edges` | Total resolved edges in the graph after indexing |
+    | `unresolved_edges` | Edges whose wikilink target couldn't be found |
+    | `duration_ms` | Wall-clock time for the full index run |
+
+    To rebuild the index from scratch (e.g. after bulk renames):
+
+    ```sh
+    smolbren index --full
+    ```
+  </Step>
+
+  <Step title="Search and query">
+    **Full-text search** with BM25 — results are ranked by relevance score:
+
+    ```sh
+    smolbren search "context engineering"
+    ```
+
+    ```json
+    [{"id":"blogs/context-engineering","path":"blogs/context-engineering.md","type":"blog","title":"Context engineering","score":0.87}]
+    ```
+
+    Narrow results to a specific note type with `--type`:
+
+    ```sh
+    smolbren search "context engineering" --type blog --limit 5
+    ```
+
+    **Graph queries** with Cypher — traverse typed relationships between notes:
+
+    ```sh
+    smolbren query "MATCH (n:blog) RETURN n.title LIMIT 5"
+    ```
+
+    ```json
+    {"columns":["n.title"],"rows":[{"n.title":"Context engineering"},{"n.title":"Context development lifecycle"},{"n.title":"Context platform engineering"}]}
+    ```
+
+    Follow edges between node types:
+
+    ```sh
+    smolbren query "MATCH (b:blog)-[:mentions]->(n:Note) RETURN b.id, n.id"
+    ```
+
+    Fetch outgoing and incoming links for a specific note:
+
+    ```sh
+    smolbren links blogs/context-engineering --type mentions
+    smolbren backlinks projects/prism
+    ```
+
+    Inspect the discovered ontology — all node types and edge types with counts:
+
+    ```sh
+    smolbren types   # [{"type":"blog","count":3}, {"type":"project","count":2}, ...]
+    smolbren edges   # [{"edge_type":"mentions","count":6}, ...]
+    ```
+  </Step>
+</Steps>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="wrench" href="/installation">
+    Full prerequisites, protoc setup, and platform-specific install instructions.
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
+    Every subcommand, flag, exit code, and JSON output shape documented in detail.
+  </Card>
+</CardGroup>

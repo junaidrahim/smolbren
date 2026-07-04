@@ -1,0 +1,87 @@
+---
+title: "smolbren output format: single-line JSON on stdout"
+sidebarTitle: "Output Format"
+description: "Every smolbren command prints exactly one line of compact JSON to stdout. Errors go to stderr as structured JSON with an error and code field."
+---
+
+smolbren always writes a single line of compact JSON to stdout. There is no pretty-printing, no progress text, and no status messages mixed in — stdout is reserved exclusively for machine-readable output. This makes every command trivially composable with `jq`, shell pipelines, and AI agent tool calls without any pre-processing.
+
+## Success output
+
+On success, one line of compact JSON is printed to stdout and the process exits with code `0`.
+
+- **List commands** (`search`, `links`, `backlinks`, `types`, `edges`, `vault list`) return a JSON array, one element per result.
+- **Single-item commands** (`get`, `index`, `vault add`, `vault remove`) return a JSON object.
+
+For example, `smolbren search "zettelkasten"` might emit:
+
+```json
+[{"id":"202401-zettelkasten","title":"Zettelkasten method","type":"blog","score":0.91},{"id":"202312-linking","title":"Linking your thinking","type":"note","score":0.74}]
+```
+
+And `smolbren get 202401-zettelkasten` returns a single object:
+
+```json
+{"id":"202401-zettelkasten","title":"Zettelkasten method","type":"blog","created_at":"2024-01-15","body":null}
+```
+
+<Note>
+Fields that are absent or inapplicable are included as `null` rather than being omitted. This keeps output shapes stable across notes so downstream code can rely on a consistent schema.
+</Note>
+
+## Error output
+
+When a command fails, the error is written to **stderr** as a single line of compact JSON with two fields — `error` (a human-readable message) and `code` (a stable machine-readable identifier):
+
+```json
+{"error":"vault 'personal' not found in config","code":"vault_not_found"}
+```
+
+**stdout remains completely empty on error.** Scripts can parse stdout unconditionally without first checking for embedded error strings — if stdout has content, the command succeeded.
+
+### Error codes
+
+| Code | Meaning |
+|---|---|
+| `internal` | An unexpected internal error occurred. Check the `error` field for details. |
+| `vault_not_found` | No vault with the given name is registered in config, or no default vault has been set and `--vault` was not provided. |
+| `note_not_found` | The note ID passed to `get`, `links`, or `backlinks` does not exist in the index. |
+| `index_missing` | The vault is registered but has never been indexed — run `smolbren index` first. |
+
+The `code` field is guaranteed to be one of these four values. Use it (rather than the `error` string) for programmatic branching; the human-readable message may change between releases.
+
+## Parsing with jq
+
+Because every command emits valid JSON on a single line, `jq` works with no special flags:
+
+```bash
+# Pull the id of the top search hit
+smolbren search "notes" | jq '.[0].id'
+
+# List all note type names from the types command
+smolbren types | jq '[.[].type]'
+
+# Get the rows returned by a Cypher query
+smolbren query "MATCH (n:blog) RETURN n.id, n.title" | jq '.rows'
+
+# Get every vault that has been indexed
+smolbren vault list | jq '[.[] | select(.indexed_at_ms != null) | .name]'
+```
+
+<Note>
+All JSON is compact — no indentation or line breaks. Pipe through `jq .` to get human-readable formatted output when inspecting results at the terminal:
+
+```bash
+smolbren get 202401-zettelkasten | jq .
+```
+</Note>
+
+<Tip>
+To suppress error output in scripts where you don't care about the failure reason, redirect stderr to `/dev/null`:
+
+```bash
+smolbren search "query" 2>/dev/null
+```
+
+stdout will still be empty on failure, so checking the exit code or testing whether stdout is non-empty is enough to detect errors. See [Exit Codes](/cli/exit-codes) for the full list of non-zero exit codes and how to branch on them.
+</Tip>

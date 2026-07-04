@@ -1,0 +1,78 @@
+---
+title: "What is a Vault? Managing your Markdown sources"
+sidebarTitle: "Vaults"
+description: "A vault is a directory of Markdown files that smolbren indexes. Learn how to register, list, and remove vaults, and how data is stored locally."
+---
+
+A **vault** is a named pointer to a directory of Markdown files — for example, your Obsidian vault, a folder of engineering notes, or any collection of `.md` files on disk. smolbren keeps a registry of vaults so you can maintain multiple independent knowledge bases and switch between them with a single flag.
+
+## Registering a vault
+
+```bash
+smolbren vault add <name> <path> [--default]
+```
+
+Register a directory as a named vault:
+
+```bash
+smolbren vault add personal ~/notes/obsidian
+smolbren vault add work /home/alice/work-notes --default
+```
+
+The `--default` flag marks this vault as the one smolbren uses when no `--vault` flag is passed. You can only have one default vault at a time; registering a new vault with `--default` replaces the previous default.
+
+smolbren stores the name-to-path mapping in `~/.smolbren/config.json`. The vault directory itself is never modified.
+
+## Listing vaults
+
+```bash
+smolbren vault list
+```
+
+Prints a JSON array with one entry per registered vault:
+
+```json
+[
+  {"name":"personal","path":"/Users/you/notes","default":true,"indexed_at_ms":1719700000000},
+  {"name":"work","path":"/home/alice/work-notes","default":false,"indexed_at_ms":null}
+]
+```
+
+Each entry shows the vault name, its directory path, whether it is the current default, and when it was last indexed (`indexed_at_ms` is `null` if the vault has never been indexed).
+
+## Removing a vault
+
+```bash
+smolbren vault remove <name>
+```
+
+Unregisters the vault **and permanently deletes its index data** from `~/.smolbren/vaults/<name>/`. The original Markdown files are never touched. Use this command when you no longer need smolbren to query a vault, or to force a clean slate before re-adding the vault.
+
+If the removed vault was the default, the default is cleared and you will need to pass `--vault` explicitly (or re-add a vault with `--default`) until a new default is set.
+
+## Using a specific vault
+
+Every smolbren command accepts a global `--vault <name>` flag that overrides the default:
+
+```bash
+smolbren search "distributed systems" --vault work
+smolbren query "MATCH (n:project) RETURN n.title" --vault personal
+smolbren index --vault work
+```
+
+## Data storage
+
+After indexing, smolbren writes all index data under:
+
+```
+~/.smolbren/vaults/<name>/
+├── notes.lance        # full-text search index + note metadata
+├── edges.lance        # typed graph edges derived from frontmatter wikilinks
+└── ontology.json      # discovered node types and edge types with counts
+```
+
+These files are managed entirely by smolbren. You do not need to read, edit, or back them up — simply re-run `smolbren index` to rebuild them from your Markdown files at any time.
+
+<Tip>
+Pass `--default` when you register your primary vault so you never have to type `--vault` for everyday searches and queries. You can always change the default later by running `smolbren vault add <name> <path> --default` again for a different vault.
+</Tip>

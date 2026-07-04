@@ -1,0 +1,82 @@
+---
+title: "Search modes: full-text and graph queries"
+sidebarTitle: "Search"
+description: "smolbren provides BM25 full-text search over note bodies and Cypher graph queries over the typed edge graph built from your frontmatter."
+---
+
+smolbren has two complementary search modes that together cover the full spectrum of how you might want to explore your vault. **Full-text search** finds notes by what they say; **graph queries** find notes by how they relate to each other.
+
+## Full-text search (BM25)
+
+```bash
+smolbren search <query> [--type <type>] [--limit <n>]
+```
+
+smolbren uses BM25 scoring — the same ranking algorithm behind most modern search engines — to rank notes by relevance to your query. Both note titles and body text are searched.
+
+| Flag | Default | Description |
+|---|---|---|
+| `--type <type>` | _(all types)_ | Restrict results to notes with a specific `type` value |
+| `--limit <n>` | `10` | Maximum number of results to return |
+
+**Example:**
+
+```bash
+smolbren search "context engineering" --type blog --limit 5
+```
+
+**Example output:**
+
+```json
+[
+  {"id":"blogs/context-engineering","path":"blogs/context-engineering.md","type":"blog","title":"Context engineering","score":14.823},
+  {"id":"blogs/context-platform-engineering","path":"blogs/context-platform-engineering.md","type":"blog","title":"Context platform engineering","score":11.204}
+]
+```
+
+Each result is an object with `id`, `path`, `type`, `title`, and `score` (BM25 relevance score, higher is more relevant). Results are ordered by descending score.
+
+## Graph queries (Cypher)
+
+```bash
+smolbren query "<cypher>" [--param key=value ...]
+```
+
+The graph is built from your vault's ontology: node labels correspond to note `type` values, and relationship types correspond to the frontmatter keys that held wikilink values. Node properties available in queries are `id`, `path`, `type`, and `title`.
+
+**Example — find all blogs that mention a repo:**
+
+```bash
+smolbren query "MATCH (b:blog)-[:mentions]->(r:repo) RETURN b.title, r.title"
+```
+
+```json
+{"columns":["b.title","r.title"],"rows":[["Context engineering","smolbren"]]}
+```
+
+**Example — look up a note by ID using a query parameter:**
+
+```bash
+smolbren query "MATCH (n) WHERE n.id = \$id RETURN n" --param id=blogs/context-engineering
+```
+
+The `--param key=value` flag can be repeated for multiple parameters. Values are parsed as JSON first (so numbers and booleans work correctly), and fall back to plain strings if they are not valid JSON.
+
+**Output format:**
+
+All query results are returned as a JSON object with two keys:
+
+```json
+{"columns":["b.title","r.title"],"rows":[["Context engineering","smolbren"]]}
+```
+
+- `columns` — ordered list of the names from the `RETURN` clause.
+- `rows` — array of arrays, one inner array per result row, values aligned to `columns`.
+
+<Note>
+The catch-all node label `Note` matches every note in the vault, regardless of whether it has a `type` key. Use it when you want to traverse relationships without restricting to a particular type: `MATCH (n:Note)-[:derives_from]->(j) RETURN n.title, j.title`.
+</Note>
+
+<Tip>
+Before writing a graph query against an unfamiliar vault, run `smolbren types` and `smolbren edges` to discover which node labels and relationship types actually exist in the index. This prevents queries that silently return zero rows because of a misspelled label or relationship name.
+</Tip>

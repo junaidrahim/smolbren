@@ -1,0 +1,83 @@
+---
+title: "smolbren types and edges — inspect the vault ontology"
+sidebarTitle: "types"
+description: "List all note types with counts (types) and all edge relationship types with counts (edges). Use these to discover your vault's ontology before writing queries."
+---
+
+Before writing Cypher queries or filtering searches, it helps to know what node labels and relationship types actually exist in your vault. The `types` command lists every distinct `type` value from note frontmatter with a count, and the `edges` command lists every distinct edge relationship type with a count. Both commands read from the ontology cache written during indexing, so they return results instantly without scanning the full dataset.
+
+## types
+
+List all note types present in the indexed vault, with the number of notes of each type.
+
+**Synopsis**
+
+```bash
+smolbren types
+```
+
+**Output**
+
+Returns a JSON array of type-count objects, one per distinct `type` value found in note frontmatter. Notes with no `type` field are counted in the total but do not appear as a row.
+
+```json
+[
+  {"type": "blog",    "count": 3},
+  {"type": "org",     "count": 1},
+  {"type": "project", "count": 1},
+  {"type": "repo",    "count": 1}
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | string | The frontmatter `type` value, e.g. `blog`, `project`, `org` |
+| `count` | integer | Number of indexed notes with this type |
+
+---
+
+## edges
+
+List all edge relationship types in the indexed vault, with counts and the number of unresolved edges.
+
+**Synopsis**
+
+```bash
+smolbren edges
+```
+
+**Output**
+
+Returns a JSON array of edge-type objects, one per distinct relationship type (frontmatter key) that contains at least one wikilink.
+
+```json
+[
+  {"edge_type": "derives_from", "count": 3},
+  {"edge_type": "for",          "count": 2},
+  {"edge_type": "mentions",     "count": 6},
+  {"edge_type": "merged_from",  "count": 2}
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `edge_type` | string | The frontmatter key that produced these edges, e.g. `mentions`, `for`, `derives_from` |
+| `count` | integer | Total number of edges of this type across all notes |
+
+<Note>
+  The per-type counts shown here are broken out by relationship type. To see the
+  total edge count and the number of unresolved edges across the entire vault,
+  check the `edges` and `unresolved_edges` fields in the output of
+  `smolbren index`.
+</Note>
+
+---
+
+<Tip>
+  Run `smolbren types` and `smolbren edges` before writing your first Cypher
+  query. The `types` output tells you what node labels are available to use in
+  `MATCH (n:Label)` patterns, and the `edges` output tells you what relationship
+  types are available for `[:TYPE]` patterns. Using a label or relationship type
+  that doesn't exist in your vault will return an empty result set rather than
+  an error, so checking first saves debugging time.
+</Tip>

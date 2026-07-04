@@ -1,0 +1,67 @@
+---
+title: "smolbren exit codes for shell scripting"
+sidebarTitle: "Exit Codes"
+description: "smolbren uses structured exit codes so scripts and agents can handle errors programmatically. Reference for all exit codes and their meanings."
+---
+
+smolbren uses non-zero exit codes to signal distinct failure conditions. Scripts and agents can branch on error type by inspecting `$?` directly — no need to parse error messages, which may change between releases. This pairs with the structured stderr JSON (see [Output Format](/cli/output-format)) for cases where you need both the code and a human-readable explanation.
+
+## Exit code reference
+
+| Code | Name | Meaning |
+|---|---|---|
+| `0` | ok | Command succeeded. |
+| `1` | internal | An unexpected internal error occurred. |
+| `2` | usage | Invalid arguments or flags were passed. |
+| `3` | vault\_not\_found | No vault with that name is registered in config, or no default vault is set and `--vault` was not provided. |
+| `4` | note\_not\_found | The note ID passed to `get`, `links`, or `backlinks` does not exist in the index. |
+| `5` | index\_missing | The vault is registered but has not been indexed yet — run `smolbren index` first. |
+
+## Shell scripting examples
+
+### Checking the exit code after a search
+
+```bash
+smolbren search "knowledge graph"
+if [ $? -ne 0 ]; then
+  echo "Search failed — see stderr for details" >&2
+  exit 1
+fi
+```
+
+### Auto-indexing on a missing index (exit code 5)
+
+A common pattern in setup scripts is to index automatically the first time a vault is used:
+
+```bash
+smolbren search "knowledge graph"
+if [ $? -eq 5 ]; then
+  echo "Index missing — running smolbren index first"
+  smolbren index
+  smolbren search "knowledge graph"
+fi
+```
+
+### Distinguishing vault errors from missing notes
+
+```bash
+result=$(smolbren get "$NOTE_ID" 2>/tmp/smolbren_err)
+code=$?
+
+if [ $code -eq 0 ]; then
+  echo "$result" | jq .
+elif [ $code -eq 4 ]; then
+  echo "Note '$NOTE_ID' not found in index." >&2
+elif [ $code -eq 3 ]; then
+  echo "No vault configured. Register one with: smolbren vault add" >&2
+else
+  cat /tmp/smolbren_err >&2
+  exit $code
+fi
+```
+
+<Note>
+Exit code `2` is emitted by the argument parser when a command is malformed — for example, a missing required argument or an unrecognised flag. The error message will appear on stderr as plain text (not JSON), because the error occurs before smolbren's own error handling runs.
+</Note>
+
+For details on the stderr JSON structure (`error` and `code` fields) that accompanies non-zero exits, see [Output Format](/cli/output-format#error-output).

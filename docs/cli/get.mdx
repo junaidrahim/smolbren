@@ -1,0 +1,113 @@
+---
+title: "smolbren get — fetch a single note by ID"
+sidebarTitle: "get"
+description: "Retrieve a note's metadata and optionally its full body text by note ID. The note ID is the vault-relative path without the .md extension."
+---
+
+The `get` command fetches a single note from the index by its ID and returns its metadata as a JSON object. By default it returns everything except the body text, keeping the response compact. Add `--body` when you need the full Markdown content — for example when feeding a note into an LLM context or rendering it in a downstream tool.
+
+## Synopsis
+
+```bash
+smolbren get <id> [--body]
+```
+
+## Arguments and flags
+
+<ParamField path="id" type="string" required>
+  The note's vault-relative ID. This is the path to the `.md` file relative to
+  the vault root, with the `.md` extension removed and directory separators
+  preserved. See [Note ID format](#note-id-format) below.
+</ParamField>
+
+<ParamField query="--body" type="boolean">
+  Include the note's full Markdown body text in the response under the `body`
+  field. The body is the raw Markdown content of the file, with frontmatter
+  stripped. Omitting `--body` keeps the response small when you only need
+  metadata.
+</ParamField>
+
+## Note ID format
+
+A note's ID is its **vault-relative path without the `.md` extension**. Given a vault rooted at `/Users/alice/notes`:
+
+| File path | Note ID |
+|-----------|---------|
+| `/Users/alice/notes/blogs/context-engineering.md` | `blogs/context-engineering` |
+| `/Users/alice/notes/projects/prism.md` | `projects/prism` |
+| `/Users/alice/notes/Journal/2026, June 01.md` | `Journal/2026, June 01` |
+
+IDs are case-sensitive and preserve the original directory casing from your vault. You can discover IDs from `search`, `query`, `links`, and `backlinks` output — they all use the same `id` field.
+
+## Output fields
+
+**Without `--body`** — returns metadata only:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Vault-relative note ID |
+| `path` | string | Vault-relative file path including `.md` |
+| `type` | string \| null | The note's frontmatter `type` value, or `null` if absent |
+| `title` | string | The note's title, derived from the first `# Heading` or the filename |
+| `frontmatter` | object \| null | The note's full frontmatter parsed into a JSON object. All frontmatter keys and values are included. `null` if the note has no frontmatter |
+
+**With `--body`** — all of the above, plus:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `body` | string | The full Markdown body text with frontmatter stripped |
+
+## Examples
+
+**Fetch metadata only (default)**
+
+```bash
+smolbren get blogs/context-engineering
+```
+
+```json
+{
+  "id": "blogs/context-engineering",
+  "path": "blogs/context-engineering.md",
+  "type": "blog",
+  "title": "Context engineering",
+  "frontmatter": {
+    "type": "blog",
+    "created": "2026-05-10",
+    "updated": "2026-06-30",
+    "status": "draft",
+    "for": "[[orgs/junaid-foo]]",
+    "mentions": ["[[projects/prism]]", "[[repos/smolbren]]"],
+    "merged_from": ["[[blogs/context-development-lifecycle]]", "[[blogs/context-platform-engineering]]"],
+    "derives_from": ["[[Journal/2026, June 01]]", "[[Journal/2026, June 04]]"],
+    "published_url": "",
+    "published_at": null
+  }
+}
+```
+
+**Fetch with full body text**
+
+```bash
+smolbren get blogs/context-engineering --body
+```
+
+```json
+{
+  "id": "blogs/context-engineering",
+  "path": "blogs/context-engineering.md",
+  "type": "blog",
+  "title": "Context engineering",
+  "frontmatter": {
+    "type": "blog",
+    "status": "draft"
+  },
+  "body": "# Context engineering\n\nDraft thesis: prompt engineering changes the instruction; context engineering changes the system around the instruction.\n"
+}
+```
+
+<Note>
+  `get` automatically parses the frontmatter and returns it as a plain JSON
+  object under the key `frontmatter` — you never need to double-parse it. If a
+  note has no frontmatter block, `frontmatter` is `null`.
+</Note>

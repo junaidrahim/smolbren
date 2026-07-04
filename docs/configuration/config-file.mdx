@@ -1,0 +1,119 @@
+---
+title: "smolbren config file reference"
+sidebarTitle: "Config File"
+description: "Configure smolbren vaults and defaults via ~/.smolbren/config.json. Reference for all supported fields, paths, and example configurations."
+---
+
+smolbren reads its configuration from `~/.smolbren/config.json`. You can manage vaults through the `smolbren vault` CLI commands, or edit the file directly — whichever fits your workflow.
+
+## Location
+
+The default config path is `~/.smolbren/config.json`. You can override it on any command using the global `--config` flag:
+
+```bash
+smolbren --config /path/to/my-config.json search "query"
+```
+
+This is especially useful for testing, scripting, or maintaining separate configurations for different projects.
+
+## Schema
+
+The config file is a flat JSON object with two top-level fields:
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `vaults` | object | No | Maps vault names to their absolute filesystem paths. Keys are the names you pass to `--vault <name>`. |
+| `default_vault` | string | No | The vault used when `--vault` is not specified on a command. |
+
+### `vaults`
+
+An object whose keys are vault names and whose values are absolute paths to the root directory of each Markdown vault (e.g. your Obsidian folder). Names are arbitrary strings — choose something memorable.
+
+```json
+"vaults": {
+  "personal": "/Users/you/Documents/Notes",
+  "work": "/Users/you/work-notes"
+}
+```
+
+### `default_vault`
+
+An optional string naming the vault to use when `--vault` is not passed. Must match a key in `vaults`. If omitted and `--vault` is also not passed, smolbren will return an error asking you to specify one.
+
+```json
+"default_vault": "personal"
+```
+
+## Example config
+
+```json
+{
+  "vaults": {
+    "personal": "/Users/you/Documents/Notes",
+    "work": "/Users/you/work-notes"
+  },
+  "default_vault": "personal"
+}
+```
+
+## Working with multiple vaults
+
+You can register as many vaults as you like and switch between them at runtime.
+
+**1. Register your first vault and make it the default:**
+
+```bash
+smolbren vault add personal /Users/you/Documents/Notes --default
+```
+
+**2. Register a second vault:**
+
+```bash
+smolbren vault add work /Users/you/work-notes
+```
+
+Your `config.json` now contains both vaults, with `personal` as the default.
+
+**3. Index and search each vault:**
+
+```bash
+# Uses the default vault (personal)
+smolbren index
+smolbren search "meeting notes"
+
+# Explicitly target the work vault
+smolbren --vault work index
+smolbren --vault work search "quarterly review"
+```
+
+**4. List all registered vaults:**
+
+```bash
+smolbren vault list
+```
+
+## Data directory
+
+For each registered vault, smolbren automatically creates a data directory at:
+
+```
+~/.smolbren/vaults/<name>/
+```
+
+This directory sits alongside `config.json` (or adjacent to whatever config path you specify via `--config`). It contains three managed files:
+
+| File | Description |
+|---|---|
+| `notes.lance` | LanceDB dataset holding indexed note embeddings and BM25-searchable content. |
+| `edges.lance` | LanceDB dataset storing the graph edges between notes (links, backlinks, typed relationships). |
+| `ontology.json` | The inferred ontology for the vault — note types, edge types, and their counts. |
+
+These files are created and updated by `smolbren index`. You do not need to read or modify them directly.
+
+<Note>
+  The config file is updated automatically when you run `smolbren vault add` or `smolbren vault remove`. Manual edits to `config.json` are equally valid — changes take effect on the next command you run.
+</Note>
+
+<Warning>
+  If you manually edit `config.json` and set a vault path to a directory that does not exist, smolbren will return an error when you attempt to run `index` or `search` against that vault. Always ensure vault paths point to existing directories containing Markdown files.
+</Warning>
