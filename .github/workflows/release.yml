@@ -63,8 +63,10 @@ jobs:
       # Runs unconditionally: it only publishes versions not yet on
       # crates.io, so a release that previously failed mid-way is picked
       # up by the next push.
+      # release-plz reads the token from --git-token, not the GITHUB_TOKEN
+      # env var (same invocation as the official release-plz action).
       - name: Release to crates.io
-        run: release-plz release
+        run: release-plz release --git-token "$GITHUB_TOKEN"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
