@@ -16,6 +16,8 @@ smolbren uses non-zero exit codes to signal distinct failure conditions. Scripts
 | `3` | vault\_not\_found | No vault with that name is registered in config, or no default vault is set and `--vault` was not provided. |
 | `4` | note\_not\_found | The note ID passed to `get`, `links`, or `backlinks` does not exist in the index. |
 | `5` | index\_missing | The vault is registered but has not been indexed yet — run `smolbren index` first. |
+| `6` | embeddings\_missing | `similar` or `search --hybrid` was called before embeddings exist — run `smolbren embed` first. |
+| `7` | model\_error | The embedding model failed to download or initialize. Check network access (the model downloads from Hugging Face on first use), or delete `~/.smolbren/models/` to clear a corrupt cache. |
 
 ## Shell scripting examples
 

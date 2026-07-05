@@ -9,7 +9,7 @@ The `search` command runs BM25 full-text search over the titles and bodies of al
 ## Synopsis
 
 ```bash
-smolbren search <query> [--type <type>] [--limit <n>]
+smolbren search <query> [--type <type>] [--limit <n>] [--hybrid]
 ```
 
 ## Arguments and flags
@@ -30,6 +30,12 @@ smolbren search <query> [--type <type>] [--limit <n>]
   Maximum number of results to return, ordered by descending BM25 score. Must
   be a positive integer. Increasing this value does not affect search quality,
   only how many results are returned.
+</ParamField>
+
+<ParamField query="--hybrid" type="boolean">
+  Fuse BM25 with vector similarity search using Reciprocal Rank Fusion.
+  Requires embeddings — run [`smolbren embed`](/cli/embed) first (exit code
+  `6` otherwise). See [Hybrid search](#hybrid-search) below.
 </ParamField>
 
 ## Output
@@ -89,10 +95,53 @@ smolbren search "context engineering" --type blog --limit 3
 ]
 ```
 
+## Hybrid search
+
+`search --hybrid` runs the query through **both** backends — BM25 keyword matching and vector similarity over embedded chunks (see [`similar`](/cli/similar)) — and fuses the two rankings with Reciprocal Rank Fusion (`k=60`): each note scores `Σ 1/(60 + rank)` across the lists it appears in, so notes ranked well by both backends rise to the top. This is the strongest default for agent retrieval: BM25 contributes keyword precision, embeddings contribute semantic recall.
+
+The output shape is a superset of plain `search`:
+
+| Extra field | Type | Description |
+|-------------|------|-------------|
+| `score` | number | The RRF fusion score (replaces the BM25 score in this mode) |
+| `bm25_score` | number \| null | BM25 component, `null` when the note matched only by similarity |
+| `similarity` | number \| null | Best-chunk cosine similarity, `null` when the note matched only by keywords |
+| `snippet` | string \| null | Best-matching chunk text (~280 chars), when the vector side matched |
+
+```bash
+smolbren search "retrieval quality" --hybrid --limit 3
+```
+
+```json
+[
+  {
+    "id": "Journal/2026, June 04",
+    "path": "Journal/2026, June 04.md",
+    "type": "journal",
+    "title": "2026, June 04",
+    "score": 0.0328,
+    "bm25_score": 3.82,
+    "similarity": 0.39,
+    "snippet": "Long day. Notes on retrieval quality and why hybrid search beats either backend alone."
+  },
+  {
+    "id": "blogs/context-engineering",
+    "path": "blogs/context-engineering.md",
+    "type": "blog",
+    "title": "Context engineering",
+    "score": 0.0161,
+    "bm25_score": null,
+    "similarity": 0.18,
+    "snippet": "# Context engineering\n\nDraft thesis: prompt engineering changes the instruction…"
+  }
+]
+```
+
 <Note>
   The vault must be indexed before running `search`. If the index is missing,
   smolbren exits with code `5` and prints
   `{"error":"index missing for vault '...' — run smolbren index first","code":"index_missing"}`
   to stderr. Run `smolbren index` once after registering a vault, and again
-  whenever your notes change.
+  whenever your notes change. `--hybrid` additionally requires
+  `smolbren embed` (exit code `6` when embeddings are missing).
 </Note>

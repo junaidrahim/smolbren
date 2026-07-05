@@ -10,7 +10,10 @@ you already write, then lets you (or your agent) query it with Cypher and BM25.
 - **Ontology-first.** Tools like `qmd` approach vault search embeddings-first.
   smolbren instead starts from the structure your notes already encode: the
   frontmatter `type` key becomes a node type, and every frontmatter key holding
-  `[[wikilinks]]` becomes a typed edge in a graph.
+  `[[wikilinks]]` becomes a typed edge in a graph. Embeddings come on top —
+  `smolbren embed` runs a local model (EmbeddingGemma-300M via ONNX, nothing
+  leaves your machine) for semantic `similar` search and BM25+vector
+  `search --hybrid`.
 - **Built for agents.** Every command prints single-line JSON to stdout, errors are
   JSON on stderr with stable exit codes, and nothing is interactive. Humans pipe to
   `jq`; agents parse directly — there's a [ready-made skill](#agent-skill) too.
@@ -66,6 +69,10 @@ smolbren index                         # incremental index (rerun any time)
 smolbren types                         # the discovered ontology
 smolbren search "ambiguous utopia"     # BM25 full-text search
 smolbren query "MATCH (b:book)-[:themes]->(t:Note) RETURN b.id, t.id"
+
+smolbren embed                         # embed chunks with a local model (~300MB, one-time download)
+smolbren similar "two worlds divided by ideology"   # semantic similarity search
+smolbren search "utopia" --hybrid      # BM25 + vector, fused with RRF
 ```
 
 Full documentation lives at **[smolbren.com](https://smolbren.com)**:
@@ -100,8 +107,9 @@ Claude Code, `~/.claude/skills/smolbren/SKILL.md` (personal) or
   not Cypher-addressable yet.
 - Wikilink targets are resolved when the *source* note is indexed; deleting a target
   leaves stale `resolved` flags on unchanged notes until `index --full`.
-- Embeddings + hybrid (BM25 + vector) search are phase 2; the schema is designed so a
-  vector column slots in via lance schema evolution without a rewrite.
+- `embed` is a separate step from `index` — new or edited notes are invisible to
+  `similar`/`search --hybrid` until you run `smolbren embed` again (it's incremental,
+  so rerunning is cheap).
 
 ## Development
 

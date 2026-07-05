@@ -1,6 +1,6 @@
 ---
 name: smolbren
-description: Search and traverse the user's markdown/Obsidian vault with the smolbren CLI — graph queries (Cypher), BM25 full-text search, links and backlinks over frontmatter-defined note types. Use when the user asks about their notes, vault, second brain, knowledge base, backlinks, or connections between notes.
+description: Search and traverse the user's markdown/Obsidian vault with the smolbren CLI — graph queries (Cypher), BM25 full-text search, semantic similarity search with local embeddings, links and backlinks over frontmatter-defined note types. Use when the user asks about their notes, vault, second brain, knowledge base, backlinks, or connections between notes.
 license: MIT
 compatibility: Requires the smolbren CLI on PATH (cargo install smolbren)
 metadata:
@@ -13,7 +13,8 @@ metadata:
 `smolbren` indexes a folder of markdown files into a local knowledge graph. Each note's
 frontmatter `type` becomes a node label; every frontmatter key whose values contain
 `[[wikilinks]]` becomes an edge type. On top of the graph there is BM25 full-text search
-over note titles and bodies.
+over note titles and bodies, plus semantic similarity search (`similar`) and hybrid
+BM25+vector search (`search --hybrid`) once `smolbren embed` has run.
 
 ## Output contract
 
@@ -28,6 +29,8 @@ over note titles and bodies.
 | 3 | vault not found / none configured | `smolbren vault add <name> <path>` |
 | 4 | note not found | Check the id with `search` |
 | 5 | index missing | Run `smolbren index` |
+| 6 | embeddings missing | Run `smolbren embed` (needed by `similar` and `search --hybrid`) |
+| 7 | model error | Embedding model download/init failed — needs network on first use; report to the user |
 
 ## Before you query
 
@@ -59,6 +62,9 @@ smolbren types                                 # [{"type","count"}]
 smolbren edges                                 # [{"edge_type","count"}]
 
 smolbren search "<query>" [--type t] [--limit n]   # [{"id","path","type","title","score"}] best-first
+smolbren search "<query>" --hybrid                 # BM25+vector RRF; adds "bm25_score","similarity","snippet" (needs embed)
+smolbren similar "<query>" [--type t] [--limit n]  # semantic search: [{"id","path","type","title","score","chunk_seq","snippet"}] (needs embed)
+smolbren embed [--full]                            # {"scanned","unchanged","embedded","removed","chunks_written","chunks_total","model","duration_ms"}
 smolbren get <id> [--body]                         # {"id","path","type","title","frontmatter"} (+"body")
 smolbren links <id> [--type edge_type]             # [{"edge_type","to_id","to_alias","resolved","position"}]
 smolbren backlinks <id> [--type edge_type]         # [{"edge_type","from_id","from_type","from_title"}]
@@ -82,8 +88,12 @@ smolbren query 'MATCH (n:Note)-[:derives_from]->(j:journal) WHERE n.id = $id RET
 
 ## Recipes
 
-- **"What do I have on X?"** — `smolbren search "X" --limit 10`, then `get <id> --body`
-  on the best hits.
+- **"What do I have on X?"** — `smolbren search "X" --hybrid --limit 10` (falls back:
+  exit 6 → run `smolbren embed` or use plain `search`), then `get <id> --body` on the
+  best hits.
+- **Conceptual/vague questions** — `smolbren similar "<full question>"` embeds meaning,
+  so phrase it as a sentence, not keywords. Best when the user's words probably don't
+  appear verbatim in their notes.
 - **"What links to this note?"** — `smolbren backlinks <id>`, optionally
   `--type <edge_type>` to narrow.
 - **Explore a note's neighborhood** — `get <id>` for its frontmatter, `links <id>` for
@@ -97,5 +107,9 @@ smolbren query 'MATCH (n:Note)-[:derives_from]->(j:journal) WHERE n.id = $id RET
   wikilink target is preserved in `to_id` but `get` on it will fail.
 - After the user deletes notes, resolved flags on unrelated notes can go stale;
   `smolbren index --full` rebuilds everything and re-resolves.
-- Search is BM25 keyword matching, not semantic — try multiple phrasings before
-  concluding a topic is absent.
+- Plain `search` is BM25 keyword matching; `similar` and `search --hybrid` are
+  semantic but only see notes embedded by the last `smolbren embed`. After notes
+  change, run `index` then `embed` (both incremental and cheap; embedding is a no-op
+  when nothing changed).
+- The first `embed` (or `similar`) downloads a ~300MB local model from Hugging Face —
+  expect it to take a few minutes once; afterwards everything is offline.

@@ -1,0 +1,80 @@
+---
+title: "smolbren similar — semantic similarity search over your vault"
+sidebarTitle: "similar"
+description: "Vector similarity search over embedded note chunks with a local embedding model. Finds notes by meaning, not keywords — filter by type and control result count."
+---
+
+The `similar` command embeds your query with the same local model used by [`embed`](/cli/embed) and returns the notes whose chunks are nearest in embedding space (cosine similarity, exact KNN). Unlike [`search`](/cli/search), which matches keywords with BM25, `similar` finds notes that are *about* the same thing even when they share no words with the query.
+
+Requires `smolbren embed` to have run first (exit code `6` otherwise).
+
+## Synopsis
+
+```bash
+smolbren similar <query> [--type <type>] [--limit <n>]
+```
+
+## Arguments and flags
+
+<ParamField path="query" type="string" required>
+  A natural-language query. Full questions and descriptions work better than
+  single keywords — the model embeds meaning, not terms.
+</ParamField>
+
+<ParamField query="--type" type="string">
+  Restrict results to notes whose frontmatter `type` exactly matches this
+  value. Case-sensitive; discover values with `smolbren types`.
+</ParamField>
+
+<ParamField query="--limit" type="integer" default="10">
+  Maximum number of notes to return, best match first.
+</ParamField>
+
+## Output
+
+A JSON array of note objects, sorted by descending `score`. Chunk hits are deduplicated: each note appears once, represented by its best-matching chunk.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Vault-relative note ID, e.g. `blogs/context-engineering` |
+| `path` | string | Vault-relative file path including `.md` |
+| `type` | string \| null | The note's frontmatter `type`, or `null` |
+| `title` | string | The note's title |
+| `score` | number | Cosine similarity of the best-matching chunk, in `[-1, 1]`; higher is more similar |
+| `chunk_seq` | integer | Which chunk of the note matched best (0-based) |
+| `snippet` | string | The matching chunk's text, truncated to ~280 characters |
+
+## Examples
+
+**Find notes by meaning**
+
+```bash
+smolbren similar "how should agents decide what goes into the context window"
+```
+
+```json
+[
+  {
+    "id": "blogs/context-engineering",
+    "path": "blogs/context-engineering.md",
+    "type": "blog",
+    "title": "Context engineering",
+    "score": 0.71,
+    "chunk_seq": 2,
+    "snippet": "…deciding what an AI system knows, when it knows it, where that knowledge came from…"
+  }
+]
+```
+
+**Restrict to one note type**
+
+```bash
+smolbren similar "retrieval quality tradeoffs" --type journal --limit 5
+```
+
+<Note>
+  `similar` needs both an index and embeddings. Exit code `5` means run
+  `smolbren index` first; exit code `6` means run `smolbren embed` first.
+  For a search that combines keyword precision with semantic recall, see
+  [`search --hybrid`](/cli/search#hybrid-search).
+</Note>

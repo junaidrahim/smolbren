@@ -1,0 +1,85 @@
+---
+title: "smolbren embed — build vector embeddings for similarity search"
+sidebarTitle: "embed"
+description: "Chunk and embed note bodies with a local embedding model so similar and search --hybrid work. Incremental by default; --full re-embeds everything."
+---
+
+The `embed` command chunks every indexed note's body along markdown boundaries and embeds each chunk with a **local embedding model** ([EmbeddingGemma-300M](https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX), quantized ONNX, run via fastembed). Vectors are stored in a per-vault `embeddings.lance` dataset next to the notes and edges datasets. Nothing leaves your machine: the model runs on CPU locally.
+
+Run it after `smolbren index` — embedding reads from the note index, not from your markdown files directly.
+
+## Synopsis
+
+```bash
+smolbren embed [--full]
+```
+
+## Flags
+
+<ParamField query="--full" type="boolean">
+  Re-chunk and re-embed every note from scratch, replacing the whole
+  embeddings dataset. Without it, only notes whose content changed since the
+  last `embed` run are re-embedded (diffed by blake3 content hash), and
+  embeddings of deleted notes are dropped.
+</ParamField>
+
+## Model download
+
+The first `embed` (or `similar`, or `search --hybrid`) downloads the embedding model (~300MB) from Hugging Face into `~/.smolbren/models/` and prints progress to stderr. Every later run loads it from that cache — no network needed. If a download fails midway, delete `~/.smolbren/models/` and retry.
+
+## Output
+
+A single JSON stats object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `scanned` | integer | Notes present in the index |
+| `unchanged` | integer | Notes whose embeddings were already current |
+| `embedded` | integer | Notes (re-)embedded this run |
+| `removed` | integer | Notes whose embeddings were dropped because the note was deleted |
+| `chunks_written` | integer | Chunk vectors written this run |
+| `chunks_total` | integer | Total chunk vectors in the dataset after the run |
+| `model` | string | Identifier of the embedding model used |
+| `duration_ms` | integer | Wall-clock duration |
+
+## Examples
+
+**First embed of a vault**
+
+```bash
+smolbren embed
+```
+
+```json
+{"scanned":412,"unchanged":0,"embedded":412,"removed":0,"chunks_written":561,"chunks_total":561,"model":"embeddinggemma-300m-onnx-q8","duration_ms":48210}
+```
+
+**Incremental run after editing two notes**
+
+```bash
+smolbren embed
+```
+
+```json
+{"scanned":412,"unchanged":410,"embedded":2,"removed":0,"chunks_written":3,"chunks_total":562,"model":"embeddinggemma-300m-onnx-q8","duration_ms":2144}
+```
+
+An incremental run with nothing to do returns immediately without even loading the model.
+
+## Chunking
+
+Bodies are split into ~3.2KB (~800 token) chunks that prefer markdown boundaries — headings start new blocks, fenced code stays intact — with a 15% tail overlap between consecutive chunks so sentences straddling a cut remain findable. Notes with empty bodies are embedded from their title so they still appear in similarity results.
+
+<Note>
+  If the embedding model or chunking parameters change between runs (e.g.
+  after a smolbren upgrade), `embed` detects the drift via the vault's
+  `embeddings_meta.json` and automatically escalates to a full re-embed, so
+  stored vectors are always mutually comparable.
+</Note>
+
+<Note>
+  Run `embed` after `index` whenever your notes change. `similar` and
+  `search --hybrid` read whatever embeddings exist; notes deleted since the
+  last embed are silently dropped from results, and new notes are invisible
+  to semantic search until embedded.
+</Note>
