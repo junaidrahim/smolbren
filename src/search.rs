@@ -8,7 +8,7 @@ use crate::vault::Vault;
 
 /// BM25 full-text search over note titles and bodies. Returns
 /// [{"id","path","type","title","score"}] ranked by descending score.
-pub async fn run(
+pub async fn bm25(
     vault: &Vault,
     query: &str,
     note_type: Option<&str>,

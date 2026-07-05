@@ -66,4 +66,10 @@ impl ConfigStore {
     pub fn vaults_dir(&self) -> PathBuf {
         self.root().join("vaults")
     }
+
+    /// Embedding model cache, shared across vaults. Lives under the config
+    /// root so `--config` isolates it in tests like everything else.
+    pub fn models_dir(&self) -> PathBuf {
+        self.root().join("models")
+    }
 }

@@ -20,12 +20,24 @@ impl Vault {
         self.data_dir.join("edges.lance").to_string_lossy().into_owned()
     }
 
+    pub fn embeddings_uri(&self) -> String {
+        self.data_dir.join("embeddings.lance").to_string_lossy().into_owned()
+    }
+
     pub fn ontology_path(&self) -> PathBuf {
         self.data_dir.join("ontology.json")
     }
 
+    pub fn embeddings_meta_path(&self) -> PathBuf {
+        self.data_dir.join("embeddings_meta.json")
+    }
+
     pub fn is_indexed(&self) -> bool {
         self.data_dir.join("notes.lance").exists()
+    }
+
+    pub fn has_embeddings(&self) -> bool {
+        self.data_dir.join("embeddings.lance").exists()
     }
 }
 

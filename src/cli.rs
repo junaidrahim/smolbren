@@ -39,8 +39,26 @@ pub enum Command {
         #[arg(long)]
         full: bool,
     },
+    /// Embed note chunks for similarity search (incremental by default)
+    Embed {
+        /// Re-embed every note from scratch
+        #[arg(long)]
+        full: bool,
+    },
     /// BM25 full-text search over note titles and bodies
     Search {
+        query: String,
+        /// Restrict results to one note type
+        #[arg(long = "type")]
+        note_type: Option<String>,
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        /// Fuse BM25 with vector similarity (requires `smolbren embed`)
+        #[arg(long)]
+        hybrid: bool,
+    },
+    /// Semantic similarity search over embedded note chunks
+    Similar {
         query: String,
         /// Restrict results to one note type
         #[arg(long = "type")]

@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use arrow_array::{ArrayRef, BooleanArray, Int32Array, Int64Array, RecordBatch, StringArray};
+use arrow_array::{
+    ArrayRef, BooleanArray, FixedSizeListArray, Float32Array, Int32Array, Int64Array, RecordBatch,
+    StringArray,
+};
 use arrow_schema::{DataType, Field, Schema};
 
 #[derive(Debug, Clone)]
@@ -17,6 +20,19 @@ pub struct NoteRow {
     pub mtime_ms: i64,
     pub size_bytes: i64,
     pub indexed_at_ms: i64,
+}
+
+/// One embedded chunk of a note's body. `content_hash` is the owning
+/// note's hash at embed time, so `smolbren embed` can diff incrementally
+/// against notes.lance without touching bodies.
+#[derive(Debug, Clone)]
+pub struct EmbeddingRow {
+    pub note_id: String,
+    pub seq: i32,
+    pub content_hash: String,
+    pub chunk_text: String,
+    pub vector: Vec<f32>,
+    pub embedded_at_ms: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -59,6 +75,50 @@ pub fn edges_schema() -> Arc<Schema> {
         Field::new("resolved", DataType::Boolean, false),
         Field::new("position", DataType::Int32, false),
     ]))
+}
+
+fn vector_item_field() -> Arc<Field> {
+    Arc::new(Field::new("item", DataType::Float32, true))
+}
+
+pub fn embeddings_schema(dim: i32) -> Arc<Schema> {
+    Arc::new(Schema::new(vec![
+        Field::new("note_id", DataType::Utf8, false),
+        Field::new("seq", DataType::Int32, false),
+        Field::new("content_hash", DataType::Utf8, false),
+        Field::new("chunk_text", DataType::Utf8, false),
+        Field::new("vector", DataType::FixedSizeList(vector_item_field(), dim), false),
+        Field::new("embedded_at_ms", DataType::Int64, false),
+    ]))
+}
+
+pub fn embeddings_batch(rows: &[EmbeddingRow], dim: i32) -> Result<RecordBatch> {
+    let mut flat: Vec<f32> = Vec::with_capacity(rows.len() * dim as usize);
+    for r in rows {
+        anyhow::ensure!(
+            r.vector.len() == dim as usize,
+            "embedding dim mismatch for note {} chunk {}: got {}, expected {dim}",
+            r.note_id,
+            r.seq,
+            r.vector.len()
+        );
+        flat.extend_from_slice(&r.vector);
+    }
+    let vectors = FixedSizeListArray::try_new(
+        vector_item_field(),
+        dim,
+        Arc::new(Float32Array::from(flat)),
+        None,
+    )?;
+    let cols: Vec<ArrayRef> = vec![
+        Arc::new(StringArray::from_iter_values(rows.iter().map(|r| r.note_id.as_str()))),
+        Arc::new(Int32Array::from_iter_values(rows.iter().map(|r| r.seq))),
+        Arc::new(StringArray::from_iter_values(rows.iter().map(|r| r.content_hash.as_str()))),
+        Arc::new(StringArray::from_iter_values(rows.iter().map(|r| r.chunk_text.as_str()))),
+        Arc::new(vectors),
+        Arc::new(Int64Array::from_iter_values(rows.iter().map(|r| r.embedded_at_ms))),
+    ];
+    Ok(RecordBatch::try_new(embeddings_schema(dim), cols)?)
 }
 
 pub fn notes_batch(rows: &[NoteRow]) -> Result<RecordBatch> {

@@ -1,4 +1,5 @@
 pub mod edges;
+pub mod embeddings;
 pub mod notes;
 pub mod schema;
 

@@ -1,5 +1,8 @@
+mod chunker;
 mod cli;
 mod config;
+mod embed;
+mod embedder;
 mod error;
 mod graph;
 mod indexer;
@@ -7,6 +10,7 @@ mod ontology;
 mod output;
 mod parser;
 mod search;
+mod similarity;
 mod store;
 mod vault;
 
@@ -36,9 +40,30 @@ async fn run(cli: Cli) -> Result<()> {
             output::print_json(&stats);
             Ok(())
         }
-        Command::Search { query, note_type, limit } => {
+        Command::Embed { full } => {
             let vault = require_indexed(&cfg, cli.vault.as_deref())?;
-            let hits = search::run(&vault, &query, note_type.as_deref(), limit).await?;
+            let stats = embed::run(&vault, &cfg.models_dir(), full).await?;
+            output::print_json(&stats);
+            Ok(())
+        }
+        Command::Search { query, note_type, limit, hybrid } => {
+            let vault = require_indexed(&cfg, cli.vault.as_deref())?;
+            let hits = if hybrid {
+                require_embedded(&vault)?;
+                similarity::hybrid(&vault, &cfg.models_dir(), &query, note_type.as_deref(), limit)
+                    .await?
+            } else {
+                search::bm25(&vault, &query, note_type.as_deref(), limit).await?
+            };
+            output::print_json(&hits);
+            Ok(())
+        }
+        Command::Similar { query, note_type, limit } => {
+            let vault = require_indexed(&cfg, cli.vault.as_deref())?;
+            require_embedded(&vault)?;
+            let hits =
+                similarity::similar(&vault, &cfg.models_dir(), &query, note_type.as_deref(), limit)
+                    .await?;
             output::print_json(&hits);
             Ok(())
         }
@@ -99,6 +124,13 @@ fn require_indexed(cfg: &ConfigStore, name: Option<&str>) -> Result<vault::Vault
         return Err(SmolbrenError::IndexMissing(vault.name));
     }
     Ok(vault)
+}
+
+fn require_embedded(vault: &vault::Vault) -> Result<()> {
+    if !vault.has_embeddings() {
+        return Err(SmolbrenError::EmbeddingsMissing(vault.name.clone()));
+    }
+    Ok(())
 }
 
 fn vault_cmd(cfg: &mut ConfigStore, cmd: VaultCmd) -> Result<()> {

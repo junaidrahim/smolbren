@@ -10,6 +10,11 @@ pub enum SmolbrenError {
     NoteNotFound(String),
     #[error("index missing for vault '{0}' — run `smolbren index` first")]
     IndexMissing(String),
+    #[error("embeddings missing for vault '{0}' — run `smolbren embed` first")]
+    EmbeddingsMissing(String),
+    // {0:#} prints anyhow's full context chain, not just the outermost layer.
+    #[error("embedding model error: {0:#}")]
+    Model(anyhow::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -20,6 +25,8 @@ impl SmolbrenError {
             Self::VaultNotFound(_) | Self::NoVault => "vault_not_found",
             Self::NoteNotFound(_) => "note_not_found",
             Self::IndexMissing(_) => "index_missing",
+            Self::EmbeddingsMissing(_) => "embeddings_missing",
+            Self::Model(_) => "model_error",
             Self::Other(_) => "internal",
         }
     }
@@ -29,6 +36,8 @@ impl SmolbrenError {
             Self::VaultNotFound(_) | Self::NoVault => 3,
             Self::NoteNotFound(_) => 4,
             Self::IndexMissing(_) => 5,
+            Self::EmbeddingsMissing(_) => 6,
+            Self::Model(_) => 7,
             Self::Other(_) => 1,
         }
     }
