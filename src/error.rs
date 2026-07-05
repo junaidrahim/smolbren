@@ -12,7 +12,8 @@ pub enum SmolbrenError {
     IndexMissing(String),
     #[error("embeddings missing for vault '{0}' — run `smolbren embed` first")]
     EmbeddingsMissing(String),
-    #[error("embedding model error: {0} — the model downloads from Hugging Face on first use; check network access, or delete the models dir to clear a corrupt cache")]
+    // {0:#} prints anyhow's full context chain, not just the outermost layer.
+    #[error("embedding model error: {0:#}")]
     Model(anyhow::Error),
     #[error(transparent)]
     Other(#[from] anyhow::Error),

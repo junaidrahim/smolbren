@@ -259,14 +259,27 @@ fn embedding_and_similarity() {
     assert_eq!(stats["scanned"], 8);
 }
 
-/// Full pipeline against the real EmbeddingGemma model. Downloads
-/// ~300MB into the test's temp dir on every run, so it is opt-in:
+/// Full pipeline against the real EmbeddingGemma model. Downloads the
+/// model into the test's temp dir on every run, so it is opt-in:
 /// `cargo test -- --ignored`.
+///
+/// Uses a generated vault of 40 notes — more than one embedding batch —
+/// because single-batch runs can't catch batching-mode bugs (the Q8
+/// dynamic-quantization failure only appeared past 32 chunks).
 #[test]
-#[ignore = "downloads the ~300MB embedding model"]
+#[ignore = "downloads the embedding model (~hundreds of MB)"]
 fn real_model_end_to_end() {
     let tmp = TempDir::new().unwrap();
     let config = tmp.path().join("config.json");
+    let vault = tmp.path().join("vault");
+    std::fs::create_dir_all(vault.join("notes")).unwrap();
+    for i in 0..40 {
+        std::fs::write(
+            vault.join(format!("notes/note-{i:02}.md")),
+            format!("---\ntype: note\n---\n\n# Note {i}\n\nBody text for note number {i}.\n"),
+        )
+        .unwrap();
+    }
 
     let real = |args: &[&str]| {
         let out = Command::cargo_bin("smolbren")
@@ -285,13 +298,13 @@ fn real_model_end_to_end() {
         serde_json::from_slice::<serde_json::Value>(&out.stdout).expect("stdout is JSON")
     };
 
-    real(&["vault", "add", "real", fixture_vault().to_str().unwrap()]);
+    real(&["vault", "add", "real", vault.to_str().unwrap()]);
     real(&["index"]);
     let stats = real(&["embed"]);
-    assert_eq!(stats["embedded"], 9);
-    assert_eq!(stats["model"], "embeddinggemma-300m-onnx-q8");
+    assert_eq!(stats["embedded"], 40);
+    assert_eq!(stats["model"], "embeddinggemma-300m-onnx-q4");
 
-    let hits = real(&["similar", "managing context windows for agents", "--limit", "3"]);
+    let hits = real(&["similar", "note number seventeen", "--limit", "3"]);
     assert!(!hits.as_array().unwrap().is_empty());
     assert!(hits[0]["score"].as_f64().unwrap() > 0.0);
 }
