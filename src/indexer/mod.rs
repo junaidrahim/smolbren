@@ -352,3 +352,70 @@ fn swap_index(vault: &Vault, staging: &Path, backup: &Path) -> Result<()> {
     remove_dir_if_exists(backup, "removing successful-swap backup")?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn test_vault(tmp: &TempDir) -> Vault {
+        Vault {
+            name: "test".to_string(),
+            source: tmp.path().join("source"),
+            data_dir: tmp.path().join("vaults/test"),
+        }
+    }
+
+    #[test]
+    fn rebuild_and_backup_directories_are_siblings_of_the_live_index() {
+        let tmp = TempDir::new().unwrap();
+        let vault = test_vault(&tmp);
+        assert_eq!(
+            sibling_dir(&vault, "rebuild"),
+            tmp.path().join("vaults/.test.rebuild")
+        );
+        assert_eq!(
+            sibling_dir(&vault, "backup"),
+            tmp.path().join("vaults/.test.backup")
+        );
+    }
+
+    #[test]
+    fn interrupted_swap_restores_the_last_good_backup() {
+        let tmp = TempDir::new().unwrap();
+        let vault = test_vault(&tmp);
+        let backup = sibling_dir(&vault, "backup");
+        let staging = sibling_dir(&vault, "rebuild");
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(backup.join("marker"), "last-good").unwrap();
+
+        recover_interrupted_swap(&vault).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(vault.data_dir.join("marker")).unwrap(),
+            "last-good"
+        );
+        assert!(!backup.exists());
+        assert!(!staging.exists());
+    }
+
+    #[test]
+    fn completed_swap_keeps_live_index_and_removes_stale_backup() {
+        let tmp = TempDir::new().unwrap();
+        let vault = test_vault(&tmp);
+        let backup = sibling_dir(&vault, "backup");
+        std::fs::create_dir_all(&vault.data_dir).unwrap();
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::write(vault.data_dir.join("marker"), "new-live").unwrap();
+        std::fs::write(backup.join("marker"), "old-live").unwrap();
+
+        recover_interrupted_swap(&vault).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(vault.data_dir.join("marker")).unwrap(),
+            "new-live"
+        );
+        assert!(!backup.exists());
+    }
+}

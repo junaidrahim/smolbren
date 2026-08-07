@@ -161,3 +161,51 @@ fn parse_kv(s: &str) -> Result<(String, String), String> {
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .ok_or_else(|| format!("expected key=value, got '{s}'"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn key_value_parser_preserves_equals_in_the_value() {
+        assert_eq!(
+            parse_kv("query=status=draft").unwrap(),
+            ("query".to_string(), "status=draft".to_string())
+        );
+    }
+
+    #[test]
+    fn key_value_parser_rejects_a_missing_separator() {
+        assert_eq!(
+            parse_kv("status").unwrap_err(),
+            "expected key=value, got 'status'"
+        );
+    }
+
+    #[test]
+    fn search_flags_parse_path_and_hybrid_together() {
+        let cli = Cli::try_parse_from([
+            "smolbren", "search", "context", "--path", "Notes/", "--hybrid",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Search {
+                path,
+                hybrid,
+                limit,
+                ..
+            } => {
+                assert_eq!(path.as_deref(), Some("Notes/"));
+                assert!(hybrid);
+                assert_eq!(limit, 10);
+            }
+            _ => panic!("expected search command"),
+        }
+    }
+
+    #[test]
+    fn text_output_format_has_a_stable_cli_value() {
+        assert_eq!(GetFormat::Text.to_string(), "text");
+        assert_eq!(GetFormat::Json.to_string(), "json");
+    }
+}

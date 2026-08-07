@@ -108,4 +108,22 @@ mod tests {
             Some("type = 'blog' AND path LIKE 'Notes/blogs/%'".to_string())
         );
     }
+
+    #[test]
+    fn metadata_filter_is_absent_without_constraints() {
+        assert_eq!(metadata_filter(None, None), None);
+    }
+
+    #[test]
+    fn metadata_filter_normalizes_paths_and_escapes_quotes() {
+        assert_eq!(
+            metadata_filter(Some("person's-note"), Some("/Notes/people/")),
+            Some("type = 'person''s-note' AND path LIKE 'Notes/people/%'".to_string())
+        );
+    }
+
+    #[test]
+    fn short_snippets_are_returned_unchanged() {
+        assert_eq!(snippet("missing", "  short body  "), "short body");
+    }
 }

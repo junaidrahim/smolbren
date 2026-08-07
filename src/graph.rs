@@ -310,5 +310,47 @@ mod tests {
         assert_eq!(promoted.schema().field_with_name("score").unwrap().data_type(), &DataType::Int64);
         assert_eq!(promoted.schema().field_with_name("public").unwrap().data_type(), &DataType::Boolean);
         assert!(promoted.schema().field_with_name("tags").is_err());
+        assert_eq!(
+            promoted
+                .column_by_name("status")
+                .unwrap()
+                .as_string::<i32>()
+                .value(0),
+            "draft"
+        );
+        assert_eq!(
+            promoted
+                .schema()
+                .fields()
+                .iter()
+                .filter(|field| field.name().eq_ignore_ascii_case("status"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn scalar_kinds_widen_numbers_and_fall_back_to_strings() {
+        assert_eq!(
+            ScalarKind::Integer.merge(ScalarKind::Float),
+            ScalarKind::Float
+        );
+        assert_eq!(
+            ScalarKind::Bool.merge(ScalarKind::String),
+            ScalarKind::String
+        );
+        assert_eq!(
+            ScalarKind::Integer.merge(ScalarKind::Integer),
+            ScalarKind::Integer
+        );
+    }
+
+    #[test]
+    fn property_names_follow_cypher_identifier_rules() {
+        assert!(valid_property_name("updated_at"));
+        assert!(valid_property_name("_private"));
+        assert!(!valid_property_name("updated-at"));
+        assert!(!valid_property_name("2fa"));
+        assert!(!valid_property_name(""));
     }
 }
