@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Canonical agent documentation via `smolbren docs --agent`.
+- Embedding freshness counts and `embeddings_stale` in `vault list`.
+- Scalar frontmatter properties, including ISO dates, in Cypher queries.
+- `smolbren unresolved` for dangling-link grooming.
+- BM25 context snippets and `--path` filters across keyword, semantic, and hybrid search.
+- Raw Markdown output through `get --format text`.
+- Transactional `index --full` rebuilds and the `smolbren repair` recovery command.
+
+### Fixed
+
+- Index failures now retain the underlying Lance error and identify the dataset,
+  operation, and candidate note paths.
+- Failed full rebuilds no longer overwrite the last readable index.
+
 ## [0.1.2](https://github.com/junaidrahim/smolbren/compare/v0.1.1...v0.1.2) - 2026-07-05
 
 ### Added

@@ -24,3 +24,12 @@ pub fn batch_to_rows(batch: &RecordBatch) -> Result<Vec<serde_json::Value>> {
 pub fn print_json<T: serde::Serialize>(value: &T) {
     println!("{}", serde_json::to_string(value).expect("value serializes"));
 }
+
+/// Explicit text output is used only by commands whose contract requests it
+/// (`docs --agent` and `get --format text`).
+pub fn print_text(value: &str) {
+    print!("{value}");
+    if !value.ends_with('\n') {
+        println!();
+    }
+}

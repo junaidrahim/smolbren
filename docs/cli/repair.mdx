@@ -1,0 +1,25 @@
+---
+title: "smolbren repair — safely rebuild a damaged index"
+sidebarTitle: "repair"
+description: "Build and validate a replacement index, then atomically swap it into place while preserving the last good index on failure."
+---
+
+`repair` is the explicit recovery path for an index that cannot be updated or
+read reliably. It performs the same transactional full rebuild as `index --full`.
+
+```bash
+smolbren repair [--vault <name>]
+```
+
+smolbren builds notes, edges, search indexes, and ontology metadata in a sibling
+directory. It validates both Lance datasets before replacing the live directory.
+Existing embeddings are preserved. If any note read, dataset write, search-index
+build, or validation fails, the command reports the operation, paths involved,
+and underlying storage error while leaving the previous index untouched.
+
+```json
+{"repaired":true,"stats":{"scanned":1607,"unchanged":0,"added":1607,"updated":0,"removed":0,"edges":2412,"unresolved_edges":92,"duration_ms":1843}}
+```
+
+If a process is interrupted between swap operations, the next `index` or `repair`
+run restores the recovery backup before continuing.

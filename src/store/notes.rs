@@ -53,13 +53,21 @@ pub async fn upsert(vault: &Vault, rows: Vec<NoteRow>) -> Result<()> {
     if rows.is_empty() {
         return Ok(());
     }
-    let batch = notes_batch(&rows)?;
+    let paths = summarize_paths(&rows);
+    let batch = notes_batch(&rows)
+        .with_context(|| format!("encoding {} note rows ({paths})", rows.len()))?;
     let reader = RecordBatchIterator::new(vec![batch].into_iter().map(Ok), notes_schema());
     if !exists(vault) {
         std::fs::create_dir_all(&vault.data_dir).context("creating vault data dir")?;
         Dataset::write(reader, vault.notes_uri().as_str(), Some(WriteParams::default()))
             .await
-            .context("creating notes dataset")?;
+            .with_context(|| {
+                format!(
+                    "creating notes dataset {} from {} rows ({paths})",
+                    vault.notes_uri(),
+                    rows.len()
+                )
+            })?;
         return Ok(());
     }
     let ds = Arc::new(open_dataset(&vault.notes_uri()).await?);
@@ -71,19 +79,42 @@ pub async fn upsert(vault: &Vault, rows: Vec<NoteRow>) -> Result<()> {
         .context("building merge insert job")?
         .execute_reader(reader)
         .await
-        .context("upserting notes")?;
+        .with_context(|| {
+            format!(
+                "upserting {} notes ({paths}) into {}",
+                rows.len(),
+                vault.notes_uri()
+            )
+        })?;
     Ok(())
 }
 
 pub async fn overwrite(vault: &Vault, rows: Vec<NoteRow>) -> Result<()> {
     std::fs::create_dir_all(&vault.data_dir).context("creating vault data dir")?;
-    let batch = notes_batch(&rows)?;
+    let paths = summarize_paths(&rows);
+    let batch = notes_batch(&rows)
+        .with_context(|| format!("encoding {} note rows ({paths})", rows.len()))?;
     let reader = RecordBatchIterator::new(vec![batch].into_iter().map(Ok), notes_schema());
     let params = WriteParams { mode: WriteMode::Overwrite, ..Default::default() };
     Dataset::write(reader, vault.notes_uri().as_str(), Some(params))
         .await
-        .context("overwriting notes dataset")?;
+        .with_context(|| {
+            format!(
+                "writing staged notes dataset {} from {} rows ({paths})",
+                vault.notes_uri(),
+                rows.len()
+            )
+        })?;
     Ok(())
+}
+
+fn summarize_paths(rows: &[NoteRow]) -> String {
+    const MAX: usize = 5;
+    let mut paths: Vec<&str> = rows.iter().take(MAX).map(|r| r.path.as_str()).collect();
+    if rows.len() > MAX {
+        paths.push("…");
+    }
+    paths.join(", ")
 }
 
 pub async fn delete_ids(vault: &Vault, ids: &[String]) -> Result<()> {

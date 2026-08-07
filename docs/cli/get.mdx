@@ -4,12 +4,12 @@ sidebarTitle: "get"
 description: "Retrieve a note's metadata and optionally its full body text by note ID. The note ID is the vault-relative path without the .md extension."
 ---
 
-The `get` command fetches a single note from the index by its ID and returns its metadata as a JSON object. By default it returns everything except the body text, keeping the response compact. Add `--body` when you need the full Markdown content — for example when feeding a note into an LLM context or rendering it in a downstream tool.
+The `get` command fetches a single note from the index by its ID and returns its metadata as a JSON object. By default it returns everything except the body text, keeping the response compact. Add `--body` when you need the full Markdown content. Use `--format text` when a shell pipeline needs the raw Markdown without JSON decoding.
 
 ## Synopsis
 
 ```bash
-smolbren get <id> [--body]
+smolbren get <id> [--body] [--format json|text]
 ```
 
 ## Arguments and flags
@@ -18,6 +18,11 @@ smolbren get <id> [--body]
   The note's vault-relative ID. This is the path to the `.md` file relative to
   the vault root, with the `.md` extension removed and directory separators
   preserved. See [Note ID format](#note-id-format) below.
+</ParamField>
+
+<ParamField query="--format" type="string" default="json">
+  Choose `json` for the normal structured response or `text` for the raw
+  Markdown body. Text mode fetches the body even if `--body` is omitted.
 </ParamField>
 
 <ParamField query="--body" type="boolean">
@@ -63,6 +68,18 @@ IDs are case-sensitive and preserve the original directory casing from your vaul
 
 ```bash
 smolbren get blogs/context-engineering
+```
+
+**Stream the raw Markdown body**
+
+```bash
+smolbren get blogs/context-engineering --body --format text
+```
+
+```markdown
+# Context engineering
+
+The full markdown body of the note...
 ```
 
 ```json

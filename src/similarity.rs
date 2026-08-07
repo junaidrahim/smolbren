@@ -44,6 +44,7 @@ pub async fn similar(
     models_dir: &Path,
     query: &str,
     note_type: Option<&str>,
+    path_prefix: Option<&str>,
     limit: usize,
 ) -> Result<Vec<serde_json::Value>> {
     let qvec = embed_query(models_dir, query).await?;
@@ -58,10 +59,15 @@ pub async fn similar(
     for h in &hits {
         // Notes deleted since the last `embed` don't join; drop them.
         let Some(m) = meta.get(&h.note_id) else { continue };
-        if let Some(t) = note_type {
-            if m.note_type.as_deref() != Some(t) {
-                continue;
-            }
+        if let Some(t) = note_type
+            && m.note_type.as_deref() != Some(t)
+        {
+            continue;
+        }
+        if let Some(prefix) = path_prefix
+            && !path_matches(&m.path, prefix)
+        {
+            continue;
         }
         rows.push(serde_json::json!({
             "id": h.note_id,
@@ -87,10 +93,11 @@ pub async fn hybrid(
     models_dir: &Path,
     query: &str,
     note_type: Option<&str>,
+    path_prefix: Option<&str>,
     limit: usize,
 ) -> Result<Vec<serde_json::Value>> {
     let depth = (limit * 5).max(50);
-    let bm25_rows = search::bm25(vault, query, note_type, depth).await?;
+    let bm25_rows = search::bm25(vault, query, note_type, path_prefix, depth).await?;
 
     let qvec = embed_query(models_dir, query).await?;
     let hits = vector_search(vault, qvec, depth.clamp(50, 512)).await?;
@@ -100,10 +107,10 @@ pub async fn hybrid(
     // lists are filtered consistently (BM25 filters in its scan).
     let vec_hits: Vec<&VectorHit> = hits
         .iter()
-        .filter(|h| match (note_type, meta.get(&h.note_id)) {
-            (_, None) => false,
-            (None, Some(_)) => true,
-            (Some(t), Some(m)) => m.note_type.as_deref() == Some(t),
+        .filter(|h| {
+            let Some(m) = meta.get(&h.note_id) else { return false };
+            note_type.is_none_or(|t| m.note_type.as_deref() == Some(t))
+                && path_prefix.is_none_or(|prefix| path_matches(&m.path, prefix))
         })
         .take(depth)
         .collect();
@@ -149,10 +156,18 @@ pub async fn hybrid(
             "score": rrf_score,
             "bm25_score": bm25_row.map(|r| r["score"].clone()).unwrap_or(serde_json::Value::Null),
             "similarity": vec_hit.map(|h| h.similarity.into()).unwrap_or(serde_json::Value::Null),
-            "snippet": vec_hit.map(|h| snippet(&h.chunk_text).into()).unwrap_or(serde_json::Value::Null),
+            "snippet": vec_hit
+                .map(|h| snippet(&h.chunk_text).into())
+                .or_else(|| bm25_row.map(|r| r["snippet"].clone()))
+                .unwrap_or(serde_json::Value::Null),
         }));
     }
     Ok(rows)
+}
+
+fn path_matches(path: &str, prefix: &str) -> bool {
+    let normalized = prefix.trim_start_matches("./").trim_start_matches('/');
+    path.starts_with(normalized)
 }
 
 /// score(id) = Σ over lists containing id of 1/(k + rank), rank 1-based.

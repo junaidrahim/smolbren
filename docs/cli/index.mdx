@@ -15,11 +15,12 @@ smolbren index [--full] [--vault <name>]
 ## Flags
 
 <ParamField query="--full" type="boolean">
-  Discard all previously stored data and rebuild the index from scratch. Every
+  Build a complete replacement index from scratch. Every
   note is re-read, re-hashed, and re-written, and all edge resolutions are
-  recomputed. Use this after renaming or moving many files, or when you suspect
-  the stored state has drifted from disk. Without `--full`, the incremental
-  strategy is used (see below).
+  recomputed. The replacement is built and validated in a sibling directory,
+  then atomically swapped into place. Any failure leaves the last good index
+  readable. Use this after renaming or moving many files. For a damaged index,
+  [`smolbren repair`](/cli/repair) is the explicit recovery command.
 </ParamField>
 
 <ParamField query="--vault" type="string">
@@ -59,10 +60,13 @@ smolbren index [--full] [--vault <name>]
 
 **Incremental (default)** — smolbren checks each file's modification time and size before reading it. Files with unchanged metadata are skipped immediately. Files that are read but whose content hash matches the stored hash are updated in place (mtime converges) without triggering an edge recomputation. Only genuinely changed, added, or removed files are written to the dataset. This makes subsequent runs very fast on large vaults.
 
-**Full rebuild (`--full`)** — smolbren ignores all stored state, reads every file from scratch, and overwrites the notes and edges datasets entirely. Use a full rebuild when:
+**Full rebuild (`--full`)** — smolbren ignores all stored note and edge state,
+builds fresh datasets beside the live index, validates them, preserves existing
+embeddings, and performs a same-filesystem directory swap. Use a full rebuild when:
 
 - You have renamed or moved many files and want to recompute all edge resolutions from a clean state.
 - The incremental state appears corrupted or out of sync.
 - You want to verify the `unresolved_edges` count is accurate across the whole vault.
 
-A full rebuild is always slower than an incremental run but guarantees a consistent, authoritative result.
+A full rebuild is always slower than an incremental run but guarantees a
+consistent, authoritative result without putting the last good index at risk.

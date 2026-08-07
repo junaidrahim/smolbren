@@ -1,7 +1,7 @@
 ---
 title: "smolbren search — BM25 full-text search over your vault"
 sidebarTitle: "search"
-description: "Run BM25 full-text search over indexed note bodies and titles. Filter by note type and control the number of results with --type and --limit."
+description: "Run BM25 full-text search with context snippets. Filter by note type or path and optionally fuse results with semantic search."
 ---
 
 The `search` command runs BM25 full-text search over the titles and bodies of all indexed notes and returns a ranked list of results. BM25 scoring accounts for term frequency, inverse document frequency, and document length, so results are ordered by relevance rather than recency or alphabetical position.
@@ -9,7 +9,7 @@ The `search` command runs BM25 full-text search over the titles and bodies of al
 ## Synopsis
 
 ```bash
-smolbren search <query> [--type <type>] [--limit <n>] [--hybrid]
+smolbren search <query> [--type <type>] [--path <prefix>] [--limit <n>] [--hybrid]
 ```
 
 ## Arguments and flags
@@ -17,6 +17,13 @@ smolbren search <query> [--type <type>] [--limit <n>] [--hybrid]
 <ParamField path="query" type="string" required>
   The search query. Multi-word queries should be quoted in your shell. Terms are
   matched against note titles and body text.
+</ParamField>
+
+<ParamField query="--path" type="string">
+  Restrict results to vault-relative paths beginning with this prefix. Use
+  `--path Notes/` to search curated notes without mixing in `Journal/`,
+  `Inbox/`, or other source material. The same filter applies to both sides of
+  hybrid search.
 </ParamField>
 
 <ParamField query="--type" type="string">
@@ -49,6 +56,7 @@ Returns a JSON array of result objects, sorted by descending `score`. An empty a
 | `type` | string \| null | The note's frontmatter `type` value, or `null` if the note has no type |
 | `title` | string | The note's title, derived from the first `# Heading` or the filename |
 | `score` | number | BM25 relevance score. Higher is more relevant. Scores are not normalised to a fixed range and are only meaningful relative to other results in the same query |
+| `snippet` | string | A UTF-8-safe body excerpt around a matching query term (about 280 bytes) |
 
 ## Examples
 
@@ -65,14 +73,16 @@ smolbren search "context engineering"
     "path": "blogs/context-engineering.md",
     "type": "blog",
     "title": "Context engineering",
-    "score": 12.487
+    "score": 12.487,
+    "snippet": "# Context engineering\n\nDraft thesis: prompt engineering changes the instruction…"
   },
   {
     "id": "blogs/context-platform-engineering",
     "path": "blogs/context-platform-engineering.md",
     "type": "blog",
     "title": "Context platform engineering",
-    "score": 9.031
+    "score": 9.031,
+    "snippet": "# Context platform engineering\n\nThe platform layer agents talk to…"
   }
 ]
 ```
@@ -90,9 +100,16 @@ smolbren search "context engineering" --type blog --limit 3
     "path": "blogs/context-engineering.md",
     "type": "blog",
     "title": "Context engineering",
-    "score": 12.487
+    "score": 12.487,
+    "snippet": "# Context engineering\n\nDraft thesis: prompt engineering changes the instruction…"
   }
 ]
+```
+
+**Restrict search to curated notes**
+
+```bash
+smolbren search "context" --path Notes/
 ```
 
 ## Hybrid search

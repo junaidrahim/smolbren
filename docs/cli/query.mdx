@@ -37,7 +37,10 @@ The graph is derived entirely from your vault's frontmatter and wikilinks. No ma
 
 **Relationship types** correspond to the frontmatter key that contained the wikilink. For example, if a note has `mentions: ["[[projects/prism]]"]` in its frontmatter, an edge of type `mentions` is created from that note to `projects/prism`.
 
-**Node properties** available in queries:
+**Node properties** available in queries include the physical fields below and
+every scalar frontmatter key whose name is a valid identifier. Property names are
+case-insensitive and normalized to prevent duplicate Cypher fields. Strings,
+numbers, and booleans retain their types. Lists and maps are intentionally omitted.
 
 | Property | Type | Description |
 |----------|------|-------------|
@@ -45,6 +48,15 @@ The graph is derived entirely from your vault's frontmatter and wikilinks. No ma
 | `path` | string | Vault-relative file path including `.md` |
 | `type` | string | The note's frontmatter `type` value |
 | `title` | string | The note's title |
+| `<frontmatter key>` | string, number, or boolean | Scalar values such as `status`, `created`, `updated`, `priority`, or `published` |
+
+Dates written in canonical ISO form (`YYYY-MM-DD`) remain strings whose lexical
+ordering is chronological. This makes weekly and recency queries straightforward:
+
+```bash
+smolbren query 'MATCH (b:blog) WHERE b.status = $status AND b.updated >= $cutoff RETURN b.id, b.updated' \
+  --param status=draft --param cutoff=2026-08-01
+```
 
 Use `smolbren types` to list all node labels in your vault, and `smolbren edges` to list all relationship types, before writing queries.
 
@@ -152,10 +164,8 @@ smolbren query '
 ```
 
 <Warning>
-  The `body` (full Markdown text) and `frontmatter` fields are **not**
-  available as node properties in query results. The graph is built from slim
-  projections for performance — only `id`, `path`, `type`, and `title` are
-  available on graph nodes. To retrieve a note's full content or parsed
-  frontmatter, use [`smolbren get <id> --body`](/cli/get) after identifying the
-  note ID from a query.
+  The `body`, complete `frontmatter` object, list values, and map values are
+  **not** available as node properties. Use
+  [`smolbren get <id> --body`](/cli/get) after identifying the note ID from a
+  query when you need those values.
 </Warning>

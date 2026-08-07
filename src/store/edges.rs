@@ -147,6 +147,48 @@ pub async fn backlinks(vault: &Vault, id: &str, edge_type: Option<&str>) -> Resu
     Ok(rows)
 }
 
+/// All dangling wikilinks, ordered as a stable grooming queue.
+pub async fn unresolved(
+    vault: &Vault,
+    edge_type: Option<&str>,
+    limit: usize,
+) -> Result<Vec<serde_json::Value>> {
+    if !exists(vault) || limit == 0 {
+        return Ok(Vec::new());
+    }
+    let ds = open_dataset(&vault.edges_uri()).await?;
+    let mut filter = "resolved = false".to_string();
+    if let Some(edge_type) = edge_type {
+        filter.push_str(&format!(" AND edge_type = {}", sql_str(edge_type)));
+    }
+    let mut scan = ds.scan();
+    scan.project(&[
+        "from_id",
+        "edge_type",
+        "to_id",
+        "to_raw",
+        "to_alias",
+        "position",
+    ])
+    .context("projecting unresolved edge columns")?;
+    scan.filter(&filter).context("filtering unresolved edges")?;
+    let batch = scan.try_into_batch().await.context("fetching unresolved edges")?;
+    let mut rows = output::batch_to_rows(&batch)?;
+    rows.sort_by(|a, b| {
+        let key = |v: &serde_json::Value| {
+            (
+                v["to_id"].as_str().unwrap_or("").to_string(),
+                v["edge_type"].as_str().unwrap_or("").to_string(),
+                v["from_id"].as_str().unwrap_or("").to_string(),
+                v["position"].as_i64().unwrap_or(0),
+            )
+        };
+        key(a).cmp(&key(b))
+    });
+    rows.truncate(limit);
+    Ok(rows)
+}
+
 /// (edge_type -> count, total edges, unresolved edges).
 pub async fn edge_counts(vault: &Vault) -> Result<(BTreeMap<String, u64>, usize, usize)> {
     if !exists(vault) {

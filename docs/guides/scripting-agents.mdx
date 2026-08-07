@@ -8,7 +8,8 @@ smolbren's JSON-first design makes it a natural tool for shell scripts, automati
 
 ## JSON stdout contract
 
-Every successful command prints **exactly one line of JSON** to stdout and exits `0`.
+Every successful command prints **exactly one line of JSON** to stdout and exits
+`0`, except the explicit `docs --agent` and `get --format text` modes.
 
 ```
 smolbren search "context engineering"
@@ -53,7 +54,7 @@ smolbren query "MATCH (n:blog) RETURN n.id, n.title" \
 **Get a note's body text:**
 
 ```bash
-smolbren get blogs/context-engineering --body | jq -r '.body'
+smolbren get blogs/context-engineering --body --format text
 ```
 
 ```
@@ -151,7 +152,14 @@ smolbren ships a ready-made [Agent Skill](https://agentskills.io) that teaches c
 npx skills add junaidrahim/smolbren
 ```
 
-The skills CLI detects the coding agents on your machine (Claude Code, Cursor, and others) and installs the skill into each one. To install manually instead, copy [`skills/smolbren/SKILL.md`](https://github.com/junaidrahim/smolbren/blob/main/skills/smolbren/SKILL.md) from the repo into your agent's skills directory — for Claude Code that is `~/.claude/skills/smolbren/SKILL.md` (personal) or `.claude/skills/smolbren/SKILL.md` (per-project).
+The skills CLI detects the coding agents on your machine (Claude Code, Cursor, and others) and installs the skill into each one. To regenerate an installed skill from the exact binary in use, run:
+
+```bash
+smolbren docs --agent > ~/.claude/skills/smolbren/SKILL.md
+```
+
+The checked-in skill and `docs --agent` output are byte-for-byte identical in CI,
+so agent documentation cannot silently drift from the release that emitted it.
 
 ## AI agent integration
 
