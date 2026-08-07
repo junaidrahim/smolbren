@@ -15,7 +15,10 @@ pub enum SmolbrenError {
     // {0:#} prints anyhow's full context chain, not just the outermost layer.
     #[error("embedding model error: {0:#}")]
     Model(anyhow::Error),
-    #[error(transparent)]
+    // Alternate (`#`) display preserves anyhow's full context chain. The CLI
+    // used to collapse storage failures to messages such as `upserting notes`,
+    // hiding the Lance error that made the failure actionable.
+    #[error("{0:#}")]
     Other(#[from] anyhow::Error),
 }
 

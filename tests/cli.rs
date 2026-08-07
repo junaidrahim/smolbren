@@ -41,6 +41,17 @@ fn run_hash(config: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
+fn run_with_env(config: &Path, args: &[&str], key: &str, value: &str) -> Output {
+    Command::cargo_bin("smolbren")
+        .unwrap()
+        .env(key, value)
+        .arg("--config")
+        .arg(config)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
 fn run_hash_json(config: &Path, args: &[&str]) -> serde_json::Value {
     let out = run_hash(config, args);
     assert!(
@@ -72,12 +83,21 @@ fn end_to_end_readonly() {
     let added = run_json(&config, &["vault", "add", "test", fixture_vault().to_str().unwrap()]);
     assert_eq!(added["default"], true);
 
+    let listed = run_json(&config, &["vault", "list"]);
+    assert_eq!(listed[0]["embedding_status_error"], "index missing");
+
     // .obsidian/junk.json must be skipped: 9 markdown notes.
     let stats = run_json(&config, &["index"]);
     assert_eq!(stats["scanned"], 9);
     assert_eq!(stats["added"], 9);
     assert_eq!(stats["edges"], 15);
     assert_eq!(stats["unresolved_edges"], 0);
+
+    let listed = run_json(&config, &["vault", "list"]);
+    assert_eq!(listed[0]["indexed_notes"], 9);
+    assert_eq!(listed[0]["embedded_notes"], 0);
+    assert_eq!(listed[0]["embedding_lag_notes"], 9);
+    assert_eq!(listed[0]["embeddings_stale"], true);
 
     // Second run is a no-op.
     let stats = run_json(&config, &["index"]);
@@ -109,6 +129,14 @@ fn end_to_end_readonly() {
     assert!(note.get("body").is_none());
     let with_body = run_json(&config, &["get", "blogs/context-engineering", "--body"]);
     assert!(with_body["body"].as_str().unwrap().contains("Draft thesis"));
+    let plain = run(
+        &config,
+        &["get", "blogs/context-engineering", "--body", "--format", "text"],
+    );
+    assert!(plain.status.success());
+    let plain = String::from_utf8(plain.stdout).unwrap();
+    assert!(plain.trim_start().starts_with("# Context engineering"));
+    assert!(plain.contains("Draft thesis"));
 
     let links = run_json(&config, &["links", "blogs/context-engineering", "--type", "mentions"]);
     let targets: Vec<&str> = links
@@ -144,9 +172,47 @@ fn end_to_end_readonly() {
     );
     assert_eq!(result["rows"].as_array().unwrap().len(), 2);
 
+    // Scalar frontmatter is queryable, including ISO date ranges.
+    let result = run_json(
+        &config,
+        &[
+            "query",
+            "MATCH (b:blog) WHERE b.status = $status AND b.created >= $cutoff RETURN b.id, b.status, b.created",
+            "--param",
+            "status=draft",
+            "--param",
+            "cutoff=2026-05-01",
+        ],
+    );
+    assert_eq!(result["rows"].as_array().unwrap().len(), 1);
+    assert_eq!(result["rows"][0]["b.id"], "blogs/context-engineering");
+    assert_eq!(result["rows"][0]["b.status"], "draft");
+    assert_eq!(result["rows"][0]["b.created"], "2026-05-10");
+
     let hits = run_json(&config, &["search", "context engineering", "--type", "blog", "--limit", "3"]);
     assert_eq!(hits[0]["id"], "blogs/context-engineering");
     assert!(hits[0]["score"].as_f64().unwrap() > 0.0);
+    assert!(hits[0]["snippet"].as_str().unwrap().contains("context engineering"));
+
+    let scoped = run_json(&config, &["search", "context", "--path", "blogs/"]);
+    assert!(!scoped.as_array().unwrap().is_empty());
+    assert!(scoped
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|hit| hit["path"].as_str().unwrap().starts_with("blogs/")));
+}
+
+#[test]
+fn agent_docs_are_emitted_from_the_canonical_skill() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("config.json");
+    let out = run(&config, &["docs", "--agent"]);
+    assert!(out.status.success());
+    assert_eq!(
+        String::from_utf8(out.stdout).unwrap(),
+        include_str!("../skills/smolbren/SKILL.md")
+    );
 }
 
 #[test]
@@ -180,6 +246,48 @@ fn incremental_mutations() {
     // Full rebuild re-resolves: dangling mentions of prism become unresolved.
     let stats = run_json(&config, &["index", "--full"]);
     assert_eq!(stats["unresolved_edges"], 3);
+    let unresolved = run_json(&config, &["unresolved"]);
+    assert_eq!(unresolved.as_array().unwrap().len(), 3);
+    assert!(unresolved
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|edge| edge["to_id"].as_str().unwrap().ends_with("prism")));
+}
+
+#[test]
+fn failed_full_rebuild_preserves_last_good_index_and_repair_recovers() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("config.json");
+    let vault = tmp.path().join("vault");
+    copy_dir(&fixture_vault(), &vault);
+
+    run_json(&config, &["vault", "add", "recovery", vault.to_str().unwrap()]);
+    run_json(&config, &["index"]);
+
+    let note_path = vault.join("blogs/context-engineering.md");
+    let mut content = std::fs::read_to_string(&note_path).unwrap();
+    content.push_str("\nTransactional rebuild marker.\n");
+    std::fs::write(&note_path, content).unwrap();
+
+    let failed = run_with_env(
+        &config,
+        &["index", "--full"],
+        "SMOLBREN_TEST_FAIL_FULL_BEFORE_SWAP",
+        "1",
+    );
+    assert_eq!(failed.status.code(), Some(1));
+    let error: serde_json::Value = serde_json::from_slice(&failed.stderr).unwrap();
+    assert!(error["error"].as_str().unwrap().contains("before swapping"));
+
+    // The live dataset is still the pre-edit version.
+    let old = run_json(&config, &["get", "blogs/context-engineering", "--body"]);
+    assert!(!old["body"].as_str().unwrap().contains("Transactional rebuild marker"));
+
+    let repaired = run_json(&config, &["repair"]);
+    assert_eq!(repaired["repaired"], true);
+    let new = run_json(&config, &["get", "blogs/context-engineering", "--body"]);
+    assert!(new["body"].as_str().unwrap().contains("Transactional rebuild marker"));
 }
 
 #[test]
@@ -205,6 +313,10 @@ fn embedding_and_similarity() {
     assert_eq!(stats["embedded"], 9);
     assert_eq!(stats["model"], "hash-test-embedder");
     assert!(stats["chunks_total"].as_u64().unwrap() >= 9);
+
+    let listed = run_hash_json(&config, &["vault", "list"]);
+    assert_eq!(listed[0]["embedding_lag_notes"], 0);
+    assert_eq!(listed[0]["embeddings_stale"], false);
 
     // Incremental no-op.
     let stats = run_hash_json(&config, &["embed"]);
@@ -238,6 +350,13 @@ fn embedding_and_similarity() {
     for h in hits.as_array().unwrap() {
         assert_eq!(h["type"], "blog");
     }
+
+    let hits = run_hash_json(&config, &["similar", "context", "--path", "blogs/"]);
+    assert!(hits
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|hit| hit["path"].as_str().unwrap().starts_with("blogs/")));
 
     // Hybrid fuses both backends; the strong BM25+vector match wins and
     // component scores are exposed.

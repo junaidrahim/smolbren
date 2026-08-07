@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 const BANNER: &str = r"┏━┓┏┳┓┏━┓╻  ┏┓ ┏━┓┏━╸┏┓╻
 ┗━┓┃┃┃┃ ┃┃  ┣┻┓┣┳┛┣╸ ┃┗┫
@@ -28,6 +28,12 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Emit documentation generated from this binary
+    Docs {
+        /// Print the canonical Agent Skill markdown
+        #[arg(long, required = true)]
+        agent: bool,
+    },
     /// Manage vaults
     Vault {
         #[command(subcommand)]
@@ -39,6 +45,8 @@ pub enum Command {
         #[arg(long)]
         full: bool,
     },
+    /// Safely rebuild a damaged index while preserving the last good copy
+    Repair,
     /// Embed note chunks for similarity search (incremental by default)
     Embed {
         /// Re-embed every note from scratch
@@ -51,6 +59,9 @@ pub enum Command {
         /// Restrict results to one note type
         #[arg(long = "type")]
         note_type: Option<String>,
+        /// Restrict results to a vault-relative path prefix
+        #[arg(long)]
+        path: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
         /// Fuse BM25 with vector similarity (requires `smolbren embed`)
@@ -63,6 +74,9 @@ pub enum Command {
         /// Restrict results to one note type
         #[arg(long = "type")]
         note_type: Option<String>,
+        /// Restrict results to a vault-relative path prefix
+        #[arg(long)]
+        path: Option<String>,
         #[arg(long, default_value_t = 10)]
         limit: usize,
     },
@@ -79,6 +93,9 @@ pub enum Command {
         /// Include the markdown body
         #[arg(long)]
         body: bool,
+        /// Output JSON metadata or the raw Markdown body
+        #[arg(long, value_enum, default_value_t = GetFormat::Json)]
+        format: GetFormat,
     },
     /// Outgoing edges of a note
     Links {
@@ -94,10 +111,33 @@ pub enum Command {
         #[arg(long = "type")]
         edge_type: Option<String>,
     },
+    /// Enumerate unresolved wikilink edges for vault grooming
+    Unresolved {
+        /// Restrict to one edge type
+        #[arg(long = "type")]
+        edge_type: Option<String>,
+        #[arg(long, default_value_t = 100)]
+        limit: usize,
+    },
     /// List note types with counts
     Types,
     /// List edge types with counts
     Edges,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum GetFormat {
+    Json,
+    Text,
+}
+
+impl std::fmt::Display for GetFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json => f.write_str("json"),
+            Self::Text => f.write_str("text"),
+        }
+    }
 }
 
 #[derive(Subcommand)]

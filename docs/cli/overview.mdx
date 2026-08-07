@@ -29,11 +29,14 @@ These flags are accepted by every subcommand and must be placed **before** the s
 |---------|-------------|
 | [`vault`](/cli/vault) | Register, list, and remove Markdown vaults |
 | [`index`](/cli/index) | Build or update the search index for a vault |
+| [`repair`](/cli/repair) | Transactionally rebuild a damaged index |
 | [`search`](/cli/search) | BM25 full-text search over note titles and bodies |
 | [`query`](/cli/query) | Execute Cypher queries over the note knowledge graph |
 | [`get`](/cli/get) | Fetch a single note by ID, optionally including its body |
 | [`links`](/cli/links) | List outgoing wikilink edges from a note |
 | [`backlinks`](/cli/links) | List incoming wikilink edges pointing to a note |
+| [`unresolved`](/cli/unresolved) | Enumerate dangling wikilinks as a grooming queue |
+| [`docs --agent`](/cli/docs) | Emit the canonical Agent Skill from the binary |
 | [`types`](/cli/types) | List all note types present in the vault with counts |
 | [`edges`](/cli/types) | List all edge relationship types with counts |
 

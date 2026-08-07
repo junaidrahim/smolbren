@@ -19,6 +19,8 @@ BM25+vector search (`search --hybrid`) once `smolbren embed` has run.
 ## Output contract
 
 - Every command prints **single-line JSON to stdout**. Parse it; never scrape prose.
+- Exceptions are explicit text modes: `docs --agent` emits this Markdown document and
+  `get --body --format text` emits the raw body.
 - Errors go to stderr as `{"error": "...", "code": "..."}` with a meaningful exit code:
 
 | Exit | Meaning | What to do |
@@ -35,7 +37,8 @@ BM25+vector search (`search --hybrid`) once `smolbren embed` has run.
 ## Before you query
 
 1. `smolbren vault list` — confirm a vault is registered (`[]` means none: ask the user
-   for their notes path, then `smolbren vault add <name> <path>`).
+   for their notes path, then `smolbren vault add <name> <path>`). If
+   `embeddings_stale` is true, run `smolbren embed` before semantic or hybrid search.
 2. `smolbren index` — incremental and cheap (unchanged files are skipped by mtime+size),
    so run it at the start of a session and again after any note files change.
 3. `smolbren types` and `smolbren edges` — learn the vault's ontology **before** writing
@@ -53,21 +56,24 @@ use those rather than guessing.
 
 ```sh
 smolbren vault add <name> <path> [--default]   # register a vault (first one becomes default)
-smolbren vault list                            # [{"name","path","default","indexed_at_ms"}]
+smolbren vault list                            # includes indexed/embedded counts and embedding lag
 smolbren vault remove <name>                   # unregister + delete its index
 
 smolbren index [--full]                        # {"scanned","unchanged","added","updated","removed","edges","unresolved_edges","duration_ms"}
+smolbren repair                                # transactional full rebuild; preserves the last good index on failure
+smolbren docs --agent                          # canonical Agent Skill markdown from this binary
 
 smolbren types                                 # [{"type","count"}]
 smolbren edges                                 # [{"edge_type","count"}]
 
-smolbren search "<query>" [--type t] [--limit n]   # [{"id","path","type","title","score"}] best-first
+smolbren search "<query>" [--type t] [--path prefix] [--limit n] # BM25 hits include snippets
 smolbren search "<query>" --hybrid                 # BM25+vector RRF; adds "bm25_score","similarity","snippet" (needs embed)
-smolbren similar "<query>" [--type t] [--limit n]  # semantic search: [{"id","path","type","title","score","chunk_seq","snippet"}] (needs embed)
+smolbren similar "<query>" [--type t] [--path prefix] [--limit n] # semantic hits with snippets (needs embed)
 smolbren embed [--full]                            # {"scanned","unchanged","embedded","removed","chunks_written","chunks_total","model","duration_ms"}
-smolbren get <id> [--body]                         # {"id","path","type","title","frontmatter"} (+"body")
+smolbren get <id> [--body] [--format json|text]    # text emits the raw Markdown body
 smolbren links <id> [--type edge_type]             # [{"edge_type","to_id","to_alias","resolved","position"}]
 smolbren backlinks <id> [--type edge_type]         # [{"edge_type","from_id","from_type","from_title"}]
+smolbren unresolved [--type edge_type] [--limit n] # dangling-link grooming queue
 
 smolbren query "<cypher>" [--param k=v]            # {"columns":[...],"rows":[{...}]}
 ```
@@ -76,14 +82,18 @@ smolbren query "<cypher>" [--param k=v]            # {"columns":[...],"rows":[{.
 
 - Node labels = the values of `smolbren types`, plus `Note` which matches every note.
 - Relationship types = the values of `smolbren edges`.
-- Only `id`, `path`, `type`, `title` are addressable as node properties. Other
-  frontmatter keys (`status`, `created`, …) are **not** queryable in Cypher — fetch the
-  note with `get` and filter its `frontmatter` object yourself.
+- `id`, `path`, `type`, and `title` plus every scalar frontmatter key with a valid
+  identifier (`status`, `created`, `updated`, booleans, and numbers) are addressable
+  as case-insensitive node properties. Lists/maps remain available through `get`,
+  not Cypher.
+- Canonical ISO date strings compare chronologically, so recency filters can use
+  `WHERE n.updated >= $cutoff` with `--param cutoff=2026-08-01`.
 - Parameters: `--param min=30`, referenced as `$min` in the query.
 
 ```sh
 smolbren query "MATCH (b:blog)-[:mentions]->(n:Note) RETURN b.id, n.id"
 smolbren query 'MATCH (n:Note)-[:derives_from]->(j:journal) WHERE n.id = $id RETURN j.id' --param id=blogs/context-engineering
+smolbren query 'MATCH (b:blog) WHERE b.status = $status AND b.updated >= $cutoff RETURN b.id, b.updated' --param status=draft --param cutoff=2026-08-01
 ```
 
 ## Recipes
@@ -96,6 +106,10 @@ smolbren query 'MATCH (n:Note)-[:derives_from]->(j:journal) WHERE n.id = $id RET
   appear verbatim in their notes.
 - **"What links to this note?"** — `smolbren backlinks <id>`, optionally
   `--type <edge_type>` to narrow.
+- **Finished notes only** — add `--path Notes/` to keyword, semantic, or hybrid
+  search to exclude Journal/Inbox/Notebook source material.
+- **Groom missing pages** — `smolbren unresolved` enumerates every dangling edge;
+  filter with `--type` when working one relation at a time.
 - **Explore a note's neighborhood** — `get <id>` for its frontmatter, `links <id>` for
   outgoing edges, `backlinks <id>` for incoming.
 - **Structured questions across types** — check `types`/`edges` first, then one Cypher

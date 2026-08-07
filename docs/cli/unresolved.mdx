@@ -1,0 +1,21 @@
+---
+title: "smolbren unresolved — enumerate dangling wikilinks"
+sidebarTitle: "unresolved"
+description: "List unresolved graph edges as a stable vault-grooming queue, optionally filtered by relationship type."
+---
+
+`unresolved` turns the unresolved count from `index` into an actionable queue.
+
+```bash
+smolbren unresolved [--type <edge-type>] [--limit <n>]
+```
+
+Results are ordered by target ID, relationship type, source ID, and frontmatter
+position. The default limit is `100`.
+
+```json
+[{"from_id":"blogs/context-engineering","edge_type":"mentions","to_id":"ideas/context-cache","to_raw":"ideas/context-cache","to_alias":null,"position":2}]
+```
+
+Use `--type derives_from` to inspect provenance gaps or `--type mentions` to find
+referenced entities that may deserve their own page.

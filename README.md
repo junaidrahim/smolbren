@@ -14,9 +14,10 @@ you already write, then lets you (or your agent) query it with Cypher and BM25.
   `smolbren embed` runs a local model (EmbeddingGemma-300M via ONNX, nothing
   leaves your machine) for semantic `similar` search and BM25+vector
   `search --hybrid`.
-- **Built for agents.** Every command prints single-line JSON to stdout, errors are
+- **Built for agents.** Commands print single-line JSON to stdout, errors are
   JSON on stderr with stable exit codes, and nothing is interactive. Humans pipe to
-  `jq`; agents parse directly — there's a [ready-made skill](#agent-skill) too.
+  `jq`; agents parse directly — and `smolbren docs --agent` emits the canonical
+  [ready-made skill](#agent-skill) from the running binary.
 - **Fully local and fast.** Storage is [Lance](https://lancedb.github.io/lance/) on
   disk under `~/.smolbren/`. Indexing is incremental (blake3 content hashes, mtime+size
   fast path) and parses files in parallel across all cores.
@@ -46,7 +47,8 @@ From each file, `smolbren index` derives an **id** (the vault-relative path with
 (`book`, which becomes a Cypher node label alongside the catch-all `Note`), a
 **title** (the first `# heading`), and **edges** — every frontmatter key whose values
 contain wikilinks becomes a relationship type (here `author`, `themes`, and
-`related`), while scalar keys like `status` stay on the note as plain frontmatter.
+`related`), while scalar keys like `status` and `started` become queryable node
+properties.
 The discovered types and edge types are the vault's **ontology**: a graph schema you
 never have to configure, queryable with Cypher and searchable with BM25.
 
@@ -73,6 +75,8 @@ smolbren query "MATCH (b:book)-[:themes]->(t:Note) RETURN b.id, t.id"
 smolbren embed                         # embed chunks with a local model (~300MB, one-time download)
 smolbren similar "two worlds divided by ideology"   # semantic similarity search
 smolbren search "utopia" --hybrid      # BM25 + vector, fused with RRF
+smolbren unresolved                    # enumerate dangling wikilinks
+smolbren query 'MATCH (b:book) WHERE b.status = "reading" RETURN b.id, b.started'
 ```
 
 Full documentation lives at **[smolbren.com](https://smolbren.com)**:
@@ -96,20 +100,24 @@ which detects your coding agents (Claude Code, Cursor, …) and installs it into
 npx skills add junaidrahim/smolbren
 ```
 
-Or install manually by copying the file into your agent's skills directory — for
-Claude Code, `~/.claude/skills/smolbren/SKILL.md` (personal) or
-`.claude/skills/smolbren/SKILL.md` (per-project).
+Or generate the exact skill bundled with your installed binary:
+
+```sh
+smolbren docs --agent > ~/.claude/skills/smolbren/SKILL.md
+```
 
 ## Current limitations
 
-- Cypher can filter/return only physical columns (`id`, `path`, `type`, `title`) —
-  arbitrary frontmatter scalars like `status` are in `get`'s `frontmatter` object but
-  not Cypher-addressable yet.
 - Wikilink targets are resolved when the *source* note is indexed; deleting a target
-  leaves stale `resolved` flags on unchanged notes until `index --full`.
+  leaves stale `resolved` flags on unchanged notes until `index --full`. Use
+  `smolbren unresolved` to inspect the current queue.
 - `embed` is a separate step from `index` — new or edited notes are invisible to
-  `similar`/`search --hybrid` until you run `smolbren embed` again (it's incremental,
-  so rerunning is cheap).
+  `similar`/`search --hybrid` until you run it again. `vault list` exposes exact lag
+  counts and an `embeddings_stale` flag so this is never silent.
+
+Full rebuilds are transactional: `index --full` and `repair` build and validate a
+sibling index, atomically swap it into place, and preserve the last good index on
+failure.
 
 ## Development
 

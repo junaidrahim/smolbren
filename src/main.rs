@@ -1,3 +1,4 @@
+mod agent_docs;
 mod chunker;
 mod cli;
 mod config;
@@ -16,7 +17,7 @@ mod vault;
 
 use clap::Parser;
 
-use crate::cli::{Cli, Command, VaultCmd};
+use crate::cli::{Cli, Command, GetFormat, VaultCmd};
 use crate::config::ConfigStore;
 use crate::error::{Result, SmolbrenError};
 use crate::vault::resolve_vault;
@@ -33,11 +34,22 @@ async fn main() {
 async fn run(cli: Cli) -> Result<()> {
     let mut cfg = ConfigStore::load(cli.config.clone())?;
     match cli.command {
-        Command::Vault { cmd } => vault_cmd(&mut cfg, cmd),
+        Command::Docs { agent } => {
+            debug_assert!(agent, "clap requires --agent");
+            output::print_text(agent_docs::SKILL);
+            Ok(())
+        }
+        Command::Vault { cmd } => vault_cmd(&mut cfg, cmd).await,
         Command::Index { full } => {
             let vault = resolve_vault(&cfg, cli.vault.as_deref())?;
             let stats = indexer::run(&vault, full).await?;
             output::print_json(&stats);
+            Ok(())
+        }
+        Command::Repair => {
+            let vault = resolve_vault(&cfg, cli.vault.as_deref())?;
+            let stats = indexer::run(&vault, true).await?;
+            output::print_json(&serde_json::json!({"repaired": true, "stats": stats}));
             Ok(())
         }
         Command::Embed { full } => {
@@ -46,23 +58,37 @@ async fn run(cli: Cli) -> Result<()> {
             output::print_json(&stats);
             Ok(())
         }
-        Command::Search { query, note_type, limit, hybrid } => {
+        Command::Search { query, note_type, path, limit, hybrid } => {
             let vault = require_indexed(&cfg, cli.vault.as_deref())?;
             let hits = if hybrid {
                 require_embedded(&vault)?;
-                similarity::hybrid(&vault, &cfg.models_dir(), &query, note_type.as_deref(), limit)
+                similarity::hybrid(
+                    &vault,
+                    &cfg.models_dir(),
+                    &query,
+                    note_type.as_deref(),
+                    path.as_deref(),
+                    limit,
+                )
                     .await?
             } else {
-                search::bm25(&vault, &query, note_type.as_deref(), limit).await?
+                search::bm25(&vault, &query, note_type.as_deref(), path.as_deref(), limit).await?
             };
             output::print_json(&hits);
             Ok(())
         }
-        Command::Similar { query, note_type, limit } => {
+        Command::Similar { query, note_type, path, limit } => {
             let vault = require_indexed(&cfg, cli.vault.as_deref())?;
             require_embedded(&vault)?;
             let hits =
-                similarity::similar(&vault, &cfg.models_dir(), &query, note_type.as_deref(), limit)
+                similarity::similar(
+                    &vault,
+                    &cfg.models_dir(),
+                    &query,
+                    note_type.as_deref(),
+                    path.as_deref(),
+                    limit,
+                )
                     .await?;
             output::print_json(&hits);
             Ok(())
@@ -73,10 +99,17 @@ async fn run(cli: Cli) -> Result<()> {
             output::print_json(&result);
             Ok(())
         }
-        Command::Get { id, body } => {
+        Command::Get { id, body, format } => {
             let vault = require_indexed(&cfg, cli.vault.as_deref())?;
-            let note = store::notes::get(&vault, &id, body).await?;
-            output::print_json(&note);
+            let note = store::notes::get(&vault, &id, body || format == GetFormat::Text).await?;
+            match format {
+                GetFormat::Json => output::print_json(&note),
+                GetFormat::Text => output::print_text(
+                    note["body"].as_str().ok_or_else(|| {
+                        SmolbrenError::Other(anyhow::anyhow!("indexed note body is not text: {id}"))
+                    })?,
+                ),
+            }
             Ok(())
         }
         Command::Links { id, edge_type } => {
@@ -88,6 +121,12 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Backlinks { id, edge_type } => {
             let vault = require_indexed(&cfg, cli.vault.as_deref())?;
             let links = store::edges::backlinks(&vault, &id, edge_type.as_deref()).await?;
+            output::print_json(&links);
+            Ok(())
+        }
+        Command::Unresolved { edge_type, limit } => {
+            let vault = require_indexed(&cfg, cli.vault.as_deref())?;
+            let links = store::edges::unresolved(&vault, edge_type.as_deref(), limit).await?;
             output::print_json(&links);
             Ok(())
         }
@@ -133,7 +172,7 @@ fn require_embedded(vault: &vault::Vault) -> Result<()> {
     Ok(())
 }
 
-fn vault_cmd(cfg: &mut ConfigStore, cmd: VaultCmd) -> Result<()> {
+async fn vault_cmd(cfg: &mut ConfigStore, cmd: VaultCmd) -> Result<()> {
     match cmd {
         VaultCmd::Add { name, path, default } => {
             let path = std::fs::canonicalize(&path).map_err(|e| {
@@ -157,23 +196,31 @@ fn vault_cmd(cfg: &mut ConfigStore, cmd: VaultCmd) -> Result<()> {
             Ok(())
         }
         VaultCmd::List => {
-            let rows: Vec<_> = cfg
-                .config
-                .vaults
-                .iter()
-                .map(|(name, path)| {
+            let mut rows = Vec::with_capacity(cfg.config.vaults.len());
+            for (name, path) in &cfg.config.vaults {
                     let data_dir = cfg.vaults_dir().join(name);
                     let indexed_at_ms = ontology::Ontology::load(&data_dir.join("ontology.json"))
                         .ok()
                         .map(|o| o.indexed_at_ms);
-                    serde_json::json!({
+                    let vault = vault::Vault {
+                        name: name.clone(),
+                        source: path.clone(),
+                        data_dir,
+                    };
+                    let embedding_status = embedding_status(&vault).await;
+                    rows.push(serde_json::json!({
                         "name": name,
                         "path": path,
                         "default": cfg.config.default_vault.as_deref() == Some(name),
                         "indexed_at_ms": indexed_at_ms,
-                    })
-                })
-                .collect();
+                        "indexed_notes": embedding_status.as_ref().ok().map(|s| s.indexed_notes),
+                        "embedded_notes": embedding_status.as_ref().ok().map(|s| s.embedded_notes),
+                        "embedding_lag_notes": embedding_status.as_ref().ok().map(|s| s.lag_notes),
+                        "orphaned_embedding_notes": embedding_status.as_ref().ok().map(|s| s.orphaned_notes),
+                        "embeddings_stale": embedding_status.as_ref().ok().map(|s| s.lag_notes > 0 || s.orphaned_notes > 0),
+                        "embedding_status_error": embedding_status.err().map(|e| e.to_string()),
+                    }));
+            }
             output::print_json(&rows);
             Ok(())
         }
@@ -195,4 +242,30 @@ fn vault_cmd(cfg: &mut ConfigStore, cmd: VaultCmd) -> Result<()> {
             Ok(())
         }
     }
+}
+
+struct EmbeddingStatus {
+    indexed_notes: usize,
+    embedded_notes: usize,
+    lag_notes: usize,
+    orphaned_notes: usize,
+}
+
+async fn embedding_status(vault: &vault::Vault) -> anyhow::Result<EmbeddingStatus> {
+    if !vault.is_indexed() {
+        anyhow::bail!("index missing");
+    }
+    let notes = store::notes::load_state(vault).await?;
+    let embedded = store::embeddings::load_state(vault).await?;
+    let lag_notes = notes
+        .iter()
+        .filter(|(id, meta)| embedded.get(*id) != Some(&meta.content_hash))
+        .count();
+    let orphaned_notes = embedded.keys().filter(|id| !notes.contains_key(*id)).count();
+    Ok(EmbeddingStatus {
+        indexed_notes: notes.len(),
+        embedded_notes: embedded.len(),
+        lag_notes,
+        orphaned_notes,
+    })
 }

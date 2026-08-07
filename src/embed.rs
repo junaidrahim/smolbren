@@ -114,14 +114,14 @@ pub async fn run(vault: &Vault, models_dir: &Path, mut full: bool) -> Result<Emb
     let vectors = tokio::task::spawn_blocking(move || -> Result<Vec<Vec<f32>>> {
         let mut model = embedder::create(&models_dir)?;
         let vectors = model.embed_docs(&pairs).map_err(SmolbrenError::Model)?;
-        if let Some(v) = vectors.first() {
-            if v.len() != model.dim() || model.dim() != embedder::EXPECTED_DIM {
-                return Err(SmolbrenError::Model(anyhow::anyhow!(
-                    "model produced {}-dim vectors, expected {}",
-                    v.len(),
-                    embedder::EXPECTED_DIM
-                )));
-            }
+        if let Some(v) = vectors.first()
+            && (v.len() != model.dim() || model.dim() != embedder::EXPECTED_DIM)
+        {
+            return Err(SmolbrenError::Model(anyhow::anyhow!(
+                "model produced {}-dim vectors, expected {}",
+                v.len(),
+                embedder::EXPECTED_DIM
+            )));
         }
         Ok(vectors)
     })

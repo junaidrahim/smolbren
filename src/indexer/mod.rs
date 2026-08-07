@@ -2,8 +2,10 @@ pub mod resolve;
 pub mod walk;
 
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use anyhow::Context;
 use rayon::prelude::*;
 use serde::Serialize;
 
@@ -27,6 +29,56 @@ pub struct IndexStats {
 }
 
 pub async fn run(vault: &Vault, full: bool) -> Result<IndexStats> {
+    recover_interrupted_swap(vault)?;
+    if full {
+        run_transactional_full(vault).await
+    } else {
+        run_inner(vault, false).await
+    }
+}
+
+/// Build a complete index beside the current one, validate it, and replace
+/// the live directory with a same-filesystem rename. Any parse/storage/index
+/// error leaves the current index untouched.
+async fn run_transactional_full(vault: &Vault) -> Result<IndexStats> {
+    let staging = sibling_dir(vault, "rebuild");
+    let backup = sibling_dir(vault, "backup");
+    remove_dir_if_exists(&staging, "removing stale rebuild directory")?;
+    let staged = vault.with_data_dir(staging.clone());
+
+    let result = async {
+        let stats = run_inner(&staged, true).await?;
+        preserve_embeddings(vault, &staged)?;
+        validate_index(&staged).await?;
+
+        // Deterministic failure injection for the recovery regression test.
+        // It is intentionally undocumented and only honored for the exact
+        // value `1`.
+        if std::env::var("SMOLBREN_TEST_FAIL_FULL_BEFORE_SWAP").as_deref() == Ok("1") {
+            return Err(SmolbrenError::Other(anyhow::anyhow!(
+                "injected full-rebuild failure before swapping {}",
+                staging.display()
+            )));
+        }
+
+        swap_index(vault, &staging, &backup)?;
+        Ok(stats)
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&staging);
+    }
+    result.map_err(|e| {
+        SmolbrenError::Other(anyhow::anyhow!(
+            "building transactional full index for vault '{}' at {}: {e}",
+            vault.name,
+            staging.display()
+        ))
+    })
+}
+
+async fn run_inner(vault: &Vault, full: bool) -> Result<IndexStats> {
     let t0 = Instant::now();
     if !vault.source.is_dir() {
         return Err(SmolbrenError::Other(anyhow::anyhow!(
@@ -54,17 +106,13 @@ pub async fn run(vault: &Vault, full: bool) -> Result<IndexStats> {
     // Parallel read + hash + parse across all cores.
     let parsed: Vec<(&walk::WalkedFile, ParsedContent)> = candidates
         .par_iter()
-        .filter_map(|f| {
-            let content = match std::fs::read_to_string(&f.abs) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("warn: skipping {}: {e}", f.rel);
-                    return None;
-                }
-            };
-            Some((*f, parser::parse_note(&f.rel, &content)))
+        .map(|f| {
+            let content = std::fs::read_to_string(&f.abs)
+                .with_context(|| format!("reading note {}", f.abs.display()))?;
+            Ok((*f, parser::parse_note(&f.rel, &content)))
         })
-        .collect();
+        .collect::<anyhow::Result<Vec<_>>>()
+        .map_err(SmolbrenError::Other)?;
 
     for (_, note) in &parsed {
         for w in &note.warnings {
@@ -174,4 +222,133 @@ pub async fn run(vault: &Vault, full: bool) -> Result<IndexStats> {
         unresolved_edges,
         duration_ms: t0.elapsed().as_millis(),
     })
+}
+
+fn sibling_dir(vault: &Vault, suffix: &str) -> PathBuf {
+    let parent = vault.data_dir.parent().unwrap_or_else(|| Path::new("."));
+    let name = vault
+        .data_dir
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&vault.name);
+    parent.join(format!(".{name}.{suffix}"))
+}
+
+fn remove_dir_if_exists(path: &Path, operation: &str) -> Result<()> {
+    if path.exists() {
+        std::fs::remove_dir_all(path)
+            .with_context(|| format!("{operation} {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Restore the last good directory if a process died between the two rename
+/// operations. If both live and backup exist, the live directory already won
+/// the swap and the backup is stale.
+pub fn recover_interrupted_swap(vault: &Vault) -> Result<()> {
+    let staging = sibling_dir(vault, "rebuild");
+    let backup = sibling_dir(vault, "backup");
+    if !vault.data_dir.exists() && backup.exists() {
+        std::fs::rename(&backup, &vault.data_dir).with_context(|| {
+            format!(
+                "restoring last good index {} to {}",
+                backup.display(),
+                vault.data_dir.display()
+            )
+        })?;
+    } else if vault.data_dir.exists() && backup.exists() {
+        remove_dir_if_exists(&backup, "removing completed-swap backup")?;
+    }
+    if staging.exists() {
+        remove_dir_if_exists(&staging, "removing interrupted rebuild")?;
+    }
+    Ok(())
+}
+
+fn preserve_embeddings(live: &Vault, staged: &Vault) -> Result<()> {
+    let source = live.data_dir.join("embeddings.lance");
+    if source.exists() {
+        copy_dir_recursive(&source, &staged.data_dir.join("embeddings.lance"))?;
+    }
+    let meta = live.embeddings_meta_path();
+    if meta.exists() {
+        std::fs::copy(&meta, staged.embeddings_meta_path()).with_context(|| {
+            format!(
+                "copying embedding metadata {} to staged index",
+                meta.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<()> {
+    std::fs::create_dir_all(target)
+        .with_context(|| format!("creating staged directory {}", target.display()))?;
+    for entry in std::fs::read_dir(source)
+        .with_context(|| format!("reading directory {}", source.display()))?
+    {
+        let entry = entry.with_context(|| format!("reading entry in {}", source.display()))?;
+        let destination = target.join(entry.file_name());
+        if entry
+            .file_type()
+            .with_context(|| format!("reading file type for {}", entry.path().display()))?
+            .is_dir()
+        {
+            copy_dir_recursive(&entry.path(), &destination)?;
+        } else {
+            std::fs::copy(entry.path(), &destination).with_context(|| {
+                format!(
+                    "copying {} to staged index {}",
+                    entry.path().display(),
+                    destination.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+async fn validate_index(vault: &Vault) -> Result<()> {
+    let notes = store::open_dataset(&vault.notes_uri()).await?;
+    notes
+        .count_rows(None)
+        .await
+        .with_context(|| format!("validating staged notes dataset {}", vault.notes_uri()))?;
+    let edges = store::open_dataset(&vault.edges_uri()).await?;
+    edges
+        .count_rows(None)
+        .await
+        .with_context(|| format!("validating staged edges dataset {}", vault.edges_uri()))?;
+    Ontology::load(&vault.ontology_path()).map_err(SmolbrenError::Other)?;
+    Ok(())
+}
+
+fn swap_index(vault: &Vault, staging: &Path, backup: &Path) -> Result<()> {
+    if let Some(parent) = vault.data_dir.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating index parent {}", parent.display()))?;
+    }
+    remove_dir_if_exists(backup, "removing stale backup")?;
+    if vault.data_dir.exists() {
+        std::fs::rename(&vault.data_dir, backup).with_context(|| {
+            format!(
+                "moving current index {} to recovery backup {}",
+                vault.data_dir.display(),
+                backup.display()
+            )
+        })?;
+    }
+    if let Err(error) = std::fs::rename(staging, &vault.data_dir) {
+        if backup.exists() && !vault.data_dir.exists() {
+            let _ = std::fs::rename(backup, &vault.data_dir);
+        }
+        return Err(SmolbrenError::Other(anyhow::anyhow!(
+            "atomically swapping staged index {} into {}: {error}",
+            staging.display(),
+            vault.data_dir.display()
+        )));
+    }
+    remove_dir_if_exists(backup, "removing successful-swap backup")?;
+    Ok(())
 }

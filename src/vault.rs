@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use crate::config::ConfigStore;
 use crate::error::{Result, SmolbrenError};
 
+#[derive(Clone, Debug)]
 pub struct Vault {
     pub name: String,
     /// Directory of markdown files (the Obsidian vault).
@@ -38,6 +39,14 @@ impl Vault {
 
     pub fn has_embeddings(&self) -> bool {
         self.data_dir.join("embeddings.lance").exists()
+    }
+
+    pub fn with_data_dir(&self, data_dir: PathBuf) -> Self {
+        Self {
+            name: self.name.clone(),
+            source: self.source.clone(),
+            data_dir,
+        }
     }
 }
 

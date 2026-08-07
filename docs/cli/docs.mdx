@@ -1,0 +1,22 @@
+---
+title: "smolbren docs --agent — emit canonical agent instructions"
+sidebarTitle: "docs --agent"
+description: "Print the Agent Skill Markdown embedded in the running smolbren binary."
+---
+
+`docs --agent` prints the canonical Agent Skill Markdown embedded in the running
+binary. This command intentionally emits text rather than JSON.
+
+```bash
+smolbren docs --agent
+```
+
+Regenerate a personal skill directly from the installed release:
+
+```bash
+smolbren docs --agent > ~/.claude/skills/smolbren/SKILL.md
+```
+
+The repository test suite compares this output byte-for-byte with
+`skills/smolbren/SKILL.md`, preventing feature documentation from drifting away
+from the binary.

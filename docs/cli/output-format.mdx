@@ -4,7 +4,7 @@ sidebarTitle: "Output Format"
 description: "Every smolbren command prints exactly one line of compact JSON to stdout. Errors go to stderr as structured JSON with an error and code field."
 ---
 
-smolbren always writes a single line of compact JSON to stdout. There is no pretty-printing, no progress text, and no status messages mixed in — stdout is reserved exclusively for machine-readable output. This makes every command trivially composable with `jq`, shell pipelines, and AI agent tool calls without any pre-processing.
+smolbren writes a single line of compact JSON to stdout by default. There is no pretty-printing, progress text, or status output mixed in. Two explicit text modes opt out of JSON: `smolbren docs --agent` emits canonical Markdown, and `smolbren get <id> --format text` emits a raw note body.
 
 ## Success output
 
@@ -12,6 +12,14 @@ On success, one line of compact JSON is printed to stdout and the process exits 
 
 - **List commands** (`search`, `links`, `backlinks`, `types`, `edges`, `vault list`) return a JSON array, one element per result.
 - **Single-item commands** (`get`, `index`, `vault add`, `vault remove`) return a JSON object.
+
+Text modes are selected explicitly, so scripts always know which output contract
+they requested:
+
+```bash
+smolbren get blogs/context-engineering --format text
+smolbren docs --agent
+```
 
 For example, `smolbren search "zettelkasten"` might emit:
 

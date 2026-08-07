@@ -67,6 +67,12 @@ Returns an array of vault objects. Each object contains:
 | `path` | string | Absolute path to the vault directory |
 | `default` | boolean | Whether this is the current default vault |
 | `indexed_at_ms` | integer \| null | Unix timestamp (ms) of the last completed index run, or `null` if the vault has never been indexed |
+| `indexed_notes` | integer \| null | Number of notes in the current index |
+| `embedded_notes` | integer \| null | Number of notes represented in the embedding dataset |
+| `embedding_lag_notes` | integer \| null | Current notes whose latest content hash has not been embedded |
+| `orphaned_embedding_notes` | integer \| null | Embedded notes no longer present in the note index |
+| `embeddings_stale` | boolean \| null | Whether either lag or orphaned embeddings exist |
+| `embedding_status_error` | string \| null | Why embedding freshness could not be calculated, such as `index missing` |
 
 **Example**
 
@@ -80,13 +86,25 @@ smolbren vault list
     "name": "notes",
     "path": "/Users/alice/Documents/notes",
     "default": true,
-    "indexed_at_ms": 1751234567890
+    "indexed_at_ms": 1751234567890,
+    "indexed_notes": 1607,
+    "embedded_notes": 1598,
+    "embedding_lag_notes": 9,
+    "orphaned_embedding_notes": 0,
+    "embeddings_stale": true,
+    "embedding_status_error": null
   },
   {
     "name": "work",
     "path": "/Users/alice/work-vault",
     "default": false,
-    "indexed_at_ms": null
+    "indexed_at_ms": null,
+    "indexed_notes": null,
+    "embedded_notes": null,
+    "embedding_lag_notes": null,
+    "orphaned_embedding_notes": null,
+    "embeddings_stale": null,
+    "embedding_status_error": "index missing"
   }
 ]
 ```

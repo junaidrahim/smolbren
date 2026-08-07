@@ -61,12 +61,15 @@
               "cli/overview",
               "cli/vault",
               "cli/index",
+              "cli/repair",
               "cli/embed",
               "cli/search",
               "cli/similar",
               "cli/query",
               "cli/get",
               "cli/links",
+              "cli/unresolved",
+              "cli/docs",
               "cli/types"
             ]
           },
