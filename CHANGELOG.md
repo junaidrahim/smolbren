@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3](https://github.com/junaidrahim/smolbren/compare/v0.1.2...v0.1.3) - 2026-08-07
+
+### Added
+
+- ship smolbren stabilization backlog ([#10](https://github.com/junaidrahim/smolbren/pull/10))
+
 ### Added
 
 - Canonical agent documentation via `smolbren docs --agent`.
