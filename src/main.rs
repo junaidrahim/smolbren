@@ -10,6 +10,7 @@ mod indexer;
 mod ontology;
 mod output;
 mod parser;
+mod progress;
 mod search;
 mod similarity;
 mod store;

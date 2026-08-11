@@ -62,6 +62,12 @@ fn run_hash_json(config: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&out.stdout).expect("stdout is JSON")
 }
 
+fn final_stderr_json(out: &Output) -> serde_json::Value {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    serde_json::from_str(stderr.lines().last().expect("stderr has an error line"))
+        .expect("last stderr line is JSON")
+}
+
 fn copy_dir(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst).unwrap();
     for entry in std::fs::read_dir(src).unwrap() {
@@ -204,6 +210,40 @@ fn end_to_end_readonly() {
 }
 
 #[test]
+fn index_and_embed_report_progress_on_stderr() {
+    let tmp = TempDir::new().unwrap();
+    let config = tmp.path().join("config.json");
+
+    run_json(&config, &["vault", "add", "progress", fixture_vault().to_str().unwrap()]);
+
+    let indexed = run(&config, &["index"]);
+    assert!(indexed.status.success());
+    let index_stats: serde_json::Value =
+        serde_json::from_slice(&indexed.stdout).expect("index stdout is JSON");
+    assert_eq!(index_stats["scanned"], 9);
+    let index_log = String::from_utf8_lossy(&indexed.stderr);
+    assert!(index_log.contains("index: discovered 9 notes"));
+    assert!(index_log.contains("index: parsed 9/9 files (100.0%)"));
+    assert!(index_log.contains("index: refreshing 0/7 search indexes"));
+    assert!(index_log.contains("index: refreshed 7/7 indexes (100.0%)"));
+    assert!(index_log.contains("index: complete"));
+    assert!(index_log.contains("ETA 0s"));
+
+    let embedded = run_hash(&config, &["embed"]);
+    assert!(embedded.status.success());
+    let embed_stats: serde_json::Value =
+        serde_json::from_slice(&embedded.stdout).expect("embed stdout is JSON");
+    assert_eq!(embed_stats["embedded"], 9);
+    let embed_log = String::from_utf8_lossy(&embedded.stderr);
+    assert!(embed_log.contains("embed: scanned 9 notes"));
+    assert!(embed_log.contains("embed: model ready"));
+    assert!(embed_log.contains("embed: embedded"));
+    assert!(embed_log.contains("chunks (100.0%)"));
+    assert!(embed_log.contains("embed: complete"));
+    assert!(embed_log.contains("ETA 0s"));
+}
+
+#[test]
 fn agent_docs_are_emitted_from_the_canonical_skill() {
     let tmp = TempDir::new().unwrap();
     let config = tmp.path().join("config.json");
@@ -277,7 +317,7 @@ fn failed_full_rebuild_preserves_last_good_index_and_repair_recovers() {
         "1",
     );
     assert_eq!(failed.status.code(), Some(1));
-    let error: serde_json::Value = serde_json::from_slice(&failed.stderr).unwrap();
+    let error = final_stderr_json(&failed);
     assert!(error["error"].as_str().unwrap().contains("before swapping"));
 
     // The live dataset is still the pre-edit version.
@@ -303,7 +343,7 @@ fn embedding_and_similarity() {
     // Similarity surfaces are gated on `embed` having run.
     let out = run_hash(&config, &["similar", "anything"]);
     assert_eq!(out.status.code(), Some(6));
-    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let err = final_stderr_json(&out);
     assert_eq!(err["code"], "embeddings_missing");
     let out = run_hash(&config, &["search", "anything", "--hybrid"]);
     assert_eq!(out.status.code(), Some(6));
@@ -448,7 +488,7 @@ fn error_codes() {
     // Unknown note.
     let out = run(&config, &["get", "nope/missing"]);
     assert_eq!(out.status.code(), Some(4));
-    let err: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    let err = final_stderr_json(&out);
     assert_eq!(err["code"], "note_not_found");
 
     // Unknown vault name.

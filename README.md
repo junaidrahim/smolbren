@@ -54,14 +54,15 @@ never have to configure, queryable with Cypher and searchable with BM25.
 
 ## Install
 
-From [crates.io](https://crates.io/crates/smolbren):
+Install the pre-built binary with [Homebrew](https://brew.sh/):
 
 ```sh
-cargo install smolbren
+brew install junaidrahim/tap/smolbren
 ```
 
-`cargo install` builds from source, so you need Rust (edition 2024) and `protoc` on
-PATH (`brew install protobuf`) — Lance compiles protobuf definitions at build time.
+Release archives for macOS and Linux on Intel/AMD and ARM64 are also available on
+the [GitHub Releases page](https://github.com/junaidrahim/smolbren/releases).
+Neither installation method requires Rust or `protoc` on your machine.
 
 ## Use it
 
@@ -78,6 +79,10 @@ smolbren search "utopia" --hybrid      # BM25 + vector, fused with RRF
 smolbren unresolved                    # enumerate dangling wikilinks
 smolbren query 'MATCH (b:book) WHERE b.status = "reading" RETURN b.id, b.started'
 ```
+
+Long-running `index`, `repair`, and `embed` commands log their current stage and
+periodic progress, throughput, and ETA to stderr. Their final machine-readable
+JSON result remains on stdout.
 
 Full documentation lives at **[smolbren.com](https://smolbren.com)**:
 the [quickstart](https://smolbren.com/quickstart), core concepts
@@ -134,9 +139,10 @@ cargo test            # includes an end-to-end CLI test over tests/fixture_vault
 Releases are automated: every push to `main` runs
 [release-plz](https://release-plz.dev/), which computes the next semver from
 [Conventional Commits](https://www.conventionalcommits.org/), updates the changelog,
-publishes to crates.io, and tags a GitHub release. Use conventional commit messages
-(`feat:`, `fix:`, …) so your change lands in the right version bump. Docs live in
-[`docs/`](docs/) as a Mintlify site and deploy on push to `main`.
+publishes to crates.io, tags a GitHub release, builds native macOS/Linux archives,
+and updates the Homebrew tap. Use conventional commit messages (`feat:`, `fix:`, …)
+so your change lands in the right version bump. Docs live in [`docs/`](docs/) as a
+Mintlify site and deploy on push to `main`.
 
 ## License
 
