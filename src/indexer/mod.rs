@@ -3,6 +3,7 @@ pub mod walk;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Context;
@@ -12,6 +13,7 @@ use serde::Serialize;
 use crate::error::{Result, SmolbrenError};
 use crate::ontology::Ontology;
 use crate::parser::{self, ParsedContent};
+use crate::progress::Progress;
 use crate::store::schema::{EdgeRow, NoteRow};
 use crate::store::{self, StoredMeta};
 use crate::vault::Vault;
@@ -29,12 +31,23 @@ pub struct IndexStats {
 }
 
 pub async fn run(vault: &Vault, full: bool) -> Result<IndexStats> {
+    let t0 = Instant::now();
     recover_interrupted_swap(vault)?;
-    if full {
+    let mut stats = if full {
         run_transactional_full(vault).await
     } else {
         run_inner(vault, false).await
-    }
+    }?;
+    stats.duration_ms = t0.elapsed().as_millis();
+    eprintln!(
+        "index: complete — {} notes scanned, {} added, {} updated, {} removed in {:.1}s",
+        stats.scanned,
+        stats.added,
+        stats.updated,
+        stats.removed,
+        t0.elapsed().as_secs_f64(),
+    );
+    Ok(stats)
 }
 
 /// Build a complete index beside the current one, validate it, and replace
@@ -48,6 +61,7 @@ async fn run_transactional_full(vault: &Vault) -> Result<IndexStats> {
 
     let result = async {
         let stats = run_inner(&staged, true).await?;
+        eprintln!("index: validating rebuilt index");
         preserve_embeddings(vault, &staged)?;
         validate_index(&staged).await?;
 
@@ -60,7 +74,7 @@ async fn run_transactional_full(vault: &Vault) -> Result<IndexStats> {
                 staging.display()
             )));
         }
-
+        eprintln!("index: activating rebuilt index");
         swap_index(vault, &staging, &backup)?;
         Ok(stats)
     }
@@ -87,6 +101,7 @@ async fn run_inner(vault: &Vault, full: bool) -> Result<IndexStats> {
         )));
     }
 
+    eprintln!("index: scanning {}", vault.source.display());
     let files = walk::walk_vault(&vault.source)?;
     let live_ids: HashSet<String> = files.iter().map(|f| parser::note_id(&f.rel)).collect();
 
@@ -102,14 +117,30 @@ async fn run_inner(vault: &Vault, full: bool) -> Result<IndexStats> {
             .get(&parser::note_id(&f.rel))
             .is_some_and(|m| m.mtime_ms == f.mtime_ms && m.size_bytes == f.size_bytes)
     });
+    eprintln!(
+        "index: discovered {} notes — {} need parsing, {} unchanged",
+        files.len(),
+        candidates.len(),
+        skipped.len(),
+    );
 
     // Parallel read + hash + parse across all cores.
+    if !candidates.is_empty() {
+        eprintln!("index: parsing 0/{} files", candidates.len());
+    }
+    let parse_progress =
+        Mutex::new((0usize, Progress::new("index: parsed", "files", candidates.len())));
     let parsed: Vec<(&walk::WalkedFile, ParsedContent)> = candidates
         .par_iter()
         .map(|f| {
             let content = std::fs::read_to_string(&f.abs)
                 .with_context(|| format!("reading note {}", f.abs.display()))?;
-            Ok((*f, parser::parse_note(&f.rel, &content)))
+            let parsed = parser::parse_note(&f.rel, &content);
+            let mut progress = parse_progress.lock().expect("parse progress reporter poisoned");
+            progress.0 += 1;
+            let completed = progress.0;
+            progress.1.update(completed);
+            Ok((*f, parsed))
         })
         .collect::<anyhow::Result<Vec<_>>>()
         .map_err(SmolbrenError::Other)?;
@@ -187,6 +218,12 @@ async fn run_inner(vault: &Vault, full: bool) -> Result<IndexStats> {
         .collect();
 
     // Writes.
+    eprintln!(
+        "index: writing changes — {added} added, {updated} updated, {} metadata-only, {} removed, {} changed edges",
+        touched,
+        removed_ids.len(),
+        edge_rows.len(),
+    );
     if full {
         store::notes::overwrite(vault, note_rows).await?;
         store::edges::overwrite(vault, edge_rows).await?;

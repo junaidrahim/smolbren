@@ -79,6 +79,10 @@ smolbren unresolved                    # enumerate dangling wikilinks
 smolbren query 'MATCH (b:book) WHERE b.status = "reading" RETURN b.id, b.started'
 ```
 
+Long-running `index`, `repair`, and `embed` commands log their current stage and
+periodic progress, throughput, and ETA to stderr. Their final machine-readable
+JSON result remains on stdout.
+
 Full documentation lives at **[smolbren.com](https://smolbren.com)**:
 the [quickstart](https://smolbren.com/quickstart), core concepts
 (vaults, ontology, indexing, search), guides for

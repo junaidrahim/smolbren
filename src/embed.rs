@@ -14,6 +14,7 @@ use serde::Serialize;
 use crate::chunker;
 use crate::embedder;
 use crate::error::{Result, SmolbrenError};
+use crate::progress::Progress;
 use crate::store::embeddings::{self, EmbedMeta};
 use crate::store::schema::EmbeddingRow;
 use crate::store::{self, sql_in_list};
@@ -22,6 +23,10 @@ use crate::vault::Vault;
 /// Notes fetched per `id IN (...)` scan, bounding filter size and the
 /// bodies held in memory at once.
 const FETCH_SLICE: usize = 500;
+
+/// Keeping model calls bounded gives us useful progress/ETA updates and avoids
+/// holding all model inputs in an inference batch at once.
+const EMBED_BATCH_SIZE: usize = 32;
 
 #[derive(Debug, Serialize)]
 pub struct EmbedStats {
@@ -76,8 +81,15 @@ pub async fn run(vault: &Vault, models_dir: &Path, mut full: bool) -> Result<Emb
         .filter(|id| !notes_state.contains_key(*id))
         .cloned()
         .collect();
+    eprintln!(
+        "embed: scanned {scanned} notes — {} need embedding, {} unchanged, {} removed",
+        changed_ids.len(),
+        scanned - changed_ids.len(),
+        removed_ids.len(),
+    );
 
     if changed_ids.is_empty() && removed_ids.is_empty() {
+        eprintln!("embed: complete — embeddings are already up to date");
         return Ok(EmbedStats {
             scanned,
             unchanged: scanned,
@@ -106,22 +118,43 @@ pub async fn run(vault: &Vault, models_dir: &Path, mut full: bool) -> Result<Emb
             })
         })
         .collect();
+    eprintln!(
+        "embed: prepared {} chunks from {} changed notes",
+        chunked.len(),
+        changed_ids.len(),
+    );
 
     // Model work is sync + CPU-bound; keep it off the async runtime.
     let models_dir = models_dir.to_path_buf();
     let pairs: Vec<(String, String)> =
         chunked.iter().map(|(_, _, title, text, _)| (title.clone(), text.clone())).collect();
+    let chunks_to_embed = pairs.len();
+    eprintln!("embed: loading model {model_id}");
     let vectors = tokio::task::spawn_blocking(move || -> Result<Vec<Vec<f32>>> {
         let mut model = embedder::create(&models_dir)?;
-        let vectors = model.embed_docs(&pairs).map_err(SmolbrenError::Model)?;
-        if let Some(v) = vectors.first()
-            && (v.len() != model.dim() || model.dim() != embedder::EXPECTED_DIM)
-        {
-            return Err(SmolbrenError::Model(anyhow::anyhow!(
-                "model produced {}-dim vectors, expected {}",
-                v.len(),
-                embedder::EXPECTED_DIM
-            )));
+        eprintln!("embed: model ready — embedding 0/{chunks_to_embed} chunks");
+        let mut vectors = Vec::with_capacity(chunks_to_embed);
+        let mut progress = Progress::new("embed: embedded", "chunks", chunks_to_embed);
+        for batch in pairs.chunks(EMBED_BATCH_SIZE) {
+            let batch_vectors = model.embed_docs(batch).map_err(SmolbrenError::Model)?;
+            for vector in &batch_vectors {
+                if vector.len() != model.dim() || model.dim() != embedder::EXPECTED_DIM {
+                    return Err(SmolbrenError::Model(anyhow::anyhow!(
+                        "model produced {}-dim vectors, expected {}",
+                        vector.len(),
+                        embedder::EXPECTED_DIM
+                    )));
+                }
+            }
+            if batch_vectors.len() != batch.len() {
+                return Err(SmolbrenError::Model(anyhow::anyhow!(
+                    "model produced {} vectors for {} chunks",
+                    batch_vectors.len(),
+                    batch.len(),
+                )));
+            }
+            vectors.extend(batch_vectors);
+            progress.update(vectors.len());
         }
         Ok(vectors)
     })
@@ -147,6 +180,7 @@ pub async fn run(vault: &Vault, models_dir: &Path, mut full: bool) -> Result<Emb
     let chunks_written = rows.len();
     let dim = embedder::EXPECTED_DIM as i32;
 
+    eprintln!("embed: writing {chunks_written} chunks");
     if full {
         embeddings::overwrite(vault, rows, dim).await?;
     } else {
@@ -154,10 +188,11 @@ pub async fn run(vault: &Vault, models_dir: &Path, mut full: bool) -> Result<Emb
         owners.extend(removed_ids.iter().cloned());
         embeddings::replace_for(vault, &owners, rows, dim).await?;
     }
+    eprintln!("embed: refreshing embedding index");
     embeddings::refresh_index(vault).await?;
     current_meta.save(&vault.embeddings_meta_path())?;
 
-    Ok(EmbedStats {
+    let stats = EmbedStats {
         scanned,
         unchanged: scanned - changed_ids.len(),
         embedded: changed_ids.len(),
@@ -166,7 +201,14 @@ pub async fn run(vault: &Vault, models_dir: &Path, mut full: bool) -> Result<Emb
         chunks_total: embeddings::count(vault).await?,
         model: model_id.to_string(),
         duration_ms: t0.elapsed().as_millis(),
-    })
+    };
+    eprintln!(
+        "embed: complete — {} notes and {} chunks embedded in {:.1}s",
+        stats.embedded,
+        stats.chunks_written,
+        t0.elapsed().as_secs_f64(),
+    );
+    Ok(stats)
 }
 
 /// id, title, body, content_hash for the given notes, fetched in slices.
