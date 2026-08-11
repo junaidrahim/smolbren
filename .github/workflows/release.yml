@@ -24,6 +24,10 @@ jobs:
   release:
     needs: test
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release-info.outputs.version }}
+      tag: ${{ steps.release-info.outputs.tag }}
+      package: ${{ steps.release-info.outputs.package }}
     # never let two pushes race a release
     concurrency: crates-publish
     steps:
@@ -47,6 +51,7 @@ jobs:
       # release-plz.toml) leave the tree clean and skip the commit.
       - name: Bump version from conventional commits
         run: |
+          git pull --ff-only origin main
           release-plz update
           if ! git diff --quiet; then
             VERSION=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
@@ -70,3 +75,129 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      # release-plz creates the tag and GitHub release in this job. Pass the
+      # exact version to native builders, and also repair a release whose
+      # binary upload failed on an earlier run.
+      - name: Determine whether release binaries are missing
+        id: release-info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          tag="v$version"
+          gh release view "$tag" >/dev/null
+          assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
+          package=false
+          for target in \
+            aarch64-apple-darwin \
+            x86_64-apple-darwin \
+            aarch64-unknown-linux-gnu \
+            x86_64-unknown-linux-gnu
+          do
+            archive="smolbren-$tag-$target.tar.gz"
+            if ! grep -Fxq "$archive" <<< "$assets"; then
+              package=true
+            fi
+          done
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "package=$package"
+          } >> "$GITHUB_OUTPUT"
+
+  package-binaries:
+    name: Package ${{ matrix.target }}
+    needs: release
+    if: needs.release.outputs.package == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-22.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+          - target: aarch64-apple-darwin
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+      - name: Install protoc on Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install protoc on macOS
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+      - name: Build release binary
+        run: cargo build --locked --release
+      - name: Verify and package binary
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          TAG: ${{ needs.release.outputs.tag }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          ./target/release/smolbren --version | grep -F "smolbren $VERSION"
+          package_dir=$(mktemp -d)
+          archive="smolbren-$TAG-$TARGET.tar.gz"
+          cp target/release/smolbren README.md LICENSE "$package_dir/"
+          tar -czf "$archive" -C "$package_dir" smolbren README.md LICENSE
+          shasum -a 256 "$archive" > "$archive.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smolbren-${{ matrix.target }}
+          path: |
+            smolbren-${{ needs.release.outputs.tag }}-${{ matrix.target }}.tar.gz
+            smolbren-${{ needs.release.outputs.tag }}-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish-binaries:
+    name: Publish binaries and Homebrew formula
+    needs: [release, package-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: smolbren-*
+          merge-multiple: true
+      - name: Upload archives to the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: junaidrahim/homebrew-tap
+          ssh-key: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
+          path: homebrew-tap
+      - name: Generate and validate the Homebrew formula
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          scripts/generate-homebrew-formula.sh \
+            "$VERSION" "$GITHUB_REPOSITORY" dist homebrew-tap/Formula/smolbren.rb
+          ruby -c homebrew-tap/Formula/smolbren.rb
+      - name: Publish the Homebrew formula
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+        run: |
+          git -C homebrew-tap config user.name "github-actions[bot]"
+          git -C homebrew-tap config user.email "github-actions[bot]@users.noreply.github.com"
+          git -C homebrew-tap add Formula/smolbren.rb
+          if ! git -C homebrew-tap diff --cached --quiet; then
+            git -C homebrew-tap commit -m "smolbren $VERSION"
+            git -C homebrew-tap push
+          fi

@@ -13,10 +13,10 @@ smolbren is a single binary with no runtime dependencies beyond its own index fi
 
 <Steps>
   <Step title="Install">
-    smolbren is distributed as a Rust crate. You need the [Rust toolchain](https://rustup.rs/) (edition 2024, rustc 1.85+) and `protoc` on your `PATH` before running `cargo install` — see the [Installation guide](/installation) for full prerequisites.
+    Install the pre-built binary with Homebrew. You do not need Rust or a compiler.
 
     ```sh
-    cargo install smolbren
+    brew install junaidrahim/tap/smolbren
     ```
 
     Confirm the binary is available:
@@ -130,7 +130,7 @@ smolbren is a single binary with no runtime dependencies beyond its own index fi
 
 <CardGroup cols={2}>
   <Card title="Installation" icon="wrench" href="/installation">
-    Full prerequisites, protoc setup, and platform-specific install instructions.
+    Homebrew, release archive, update, and source-build instructions.
   </Card>
   <Card title="CLI Reference" icon="terminal" href="/cli/overview">
     Every subcommand, flag, exit code, and JSON output shape documented in detail.
