@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+step() {
+  local label=$1
+  shift
+  printf '\n==> %s\n' "$label"
+  time "$@"
+}
+
+required_packages=(
+  build-essential
+  ca-certificates
+  curl
+  pkg-config
+  protobuf-compiler
+)
+missing_packages=()
+
+for package in "${required_packages[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "$package" 2>/dev/null | grep -Fq 'install ok installed'; then
+    missing_packages+=("$package")
+  fi
+done
+
+if ((${#missing_packages[@]})); then
+  if ((EUID == 0)); then
+    apt=(apt-get)
+  else
+    apt=(sudo apt-get)
+  fi
+  step "Refresh Debian package metadata" "${apt[@]}" update
+  step "Install system dependencies: ${missing_packages[*]}" \
+    "${apt[@]}" install -y "${missing_packages[@]}"
+else
+  echo "System dependencies are already installed."
+fi
+
+export PATH="$HOME/.cargo/bin:$PATH"
+
+if ! command -v rustup >/dev/null 2>&1; then
+  step "Install rustup" sh -c \
+    'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none'
+fi
+
+profile_marker="# smolbren Rust toolchain"
+if ! grep -Fqx "$profile_marker" "$HOME/.bash_profile" 2>/dev/null; then
+  cat >>"$HOME/.bash_profile" <<'EOF'
+
+# smolbren Rust toolchain
+if [ -f "$HOME/.cargo/env" ]; then
+  . "$HOME/.cargo/env"
+fi
+EOF
+fi
+
+if ! rustup toolchain list | grep -Eq '^stable(-[^ ]+)? '; then
+  step "Install the stable Rust toolchain" \
+    rustup toolchain install stable --profile minimal --component clippy,rustfmt
+else
+  echo "Stable Rust toolchain is already installed."
+  step "Ensure Rust development components are installed" \
+    rustup component add clippy rustfmt --toolchain stable
+fi
+
+step "Select stable Rust as the default toolchain" rustup default stable
+
+# ort's x86_64 prebuilt currently targets glibc 2.38, while Amp's Debian 12
+# orbs provide glibc 2.36. Supply the six C23 integer-parsing symbols that the
+# ONNX Runtime archive references until its upstream binary lowers that floor.
+glibc_version=$(getconf GNU_LIBC_VERSION | awk '{print $2}')
+if dpkg --compare-versions "$glibc_version" lt 2.38; then
+  compat_dir="$HOME/.cache/amp/smolbren"
+  compat_source="$compat_dir/glibc-compat.c"
+  compat_object="$compat_dir/glibc-compat.o"
+  mkdir -p "$compat_dir"
+  cat >"$compat_source" <<'EOF'
+#define _GNU_SOURCE
+#include <locale.h>
+#include <stdlib.h>
+
+long __isoc23_strtol(const char *s, char **end, int base) { return strtol(s, end, base); }
+unsigned long __isoc23_strtoul(const char *s, char **end, int base) { return strtoul(s, end, base); }
+long long __isoc23_strtoll(const char *s, char **end, int base) { return strtoll(s, end, base); }
+unsigned long long __isoc23_strtoull(const char *s, char **end, int base) { return strtoull(s, end, base); }
+long long __isoc23_strtoll_l(const char *s, char **end, int base, locale_t locale) { return strtoll_l(s, end, base, locale); }
+unsigned long long __isoc23_strtoull_l(const char *s, char **end, int base, locale_t locale) { return strtoull_l(s, end, base, locale); }
+EOF
+  step "Build Debian 12 compatibility object for ONNX Runtime" \
+    cc -O2 -c "$compat_source" -o "$compat_object"
+
+  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+  compat_marker="# smolbren Debian 12 ONNX Runtime compatibility"
+  if ! grep -Fqx "$compat_marker" "$HOME/.bash_profile" 2>/dev/null; then
+    cat >>"$HOME/.bash_profile" <<EOF
+
+$compat_marker
+if [[ "\${PWD}" == "$repo_root" ]]; then
+  case " \${RUSTFLAGS:-} " in
+    *" -C link-arg=$compat_object "*) ;;
+    *) export RUSTFLAGS="\${RUSTFLAGS:+\$RUSTFLAGS }-C link-arg=$compat_object" ;;
+  esac
+fi
+EOF
+  fi
+fi
+
+step "Fetch locked Cargo dependencies" cargo fetch --locked
+
+printf '\nOrb setup complete.\n'

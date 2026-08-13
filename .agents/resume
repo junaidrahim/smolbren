@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# smolbren has no backing services or tunnels to restore after an orb wakes.
+echo "No orb services need to be resumed."
