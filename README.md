@@ -60,8 +60,8 @@ Install the pre-built binary with [Homebrew](https://brew.sh/):
 brew install junaidrahim/tap/smolbren
 ```
 
-Release archives for macOS and Linux on Intel/AMD and ARM64 are also available on
-the [GitHub Releases page](https://github.com/junaidrahim/smolbren/releases).
+Release archives for macOS on Apple Silicon and Linux on Intel/AMD and ARM64 are
+also available on the [GitHub Releases page](https://github.com/junaidrahim/smolbren/releases).
 Neither installation method requires Rust or `protoc` on your machine.
 
 ## Use it

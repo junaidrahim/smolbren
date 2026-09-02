@@ -53,9 +53,11 @@ Every [GitHub release](https://github.com/junaidrahim/smolbren/releases) include
 `.tar.gz` archives and SHA-256 checksum files for each supported platform:
 
 - `aarch64-apple-darwin` — macOS on Apple Silicon
-- `x86_64-apple-darwin` — macOS on Intel
 - `aarch64-unknown-linux-gnu` — Linux on ARM64
 - `x86_64-unknown-linux-gnu` — Linux on Intel or AMD
+
+Intel macOS is not available as a pre-built binary because the ONNX Runtime
+used for local embeddings no longer publishes that target.
 
 Download the archive for your system, verify it against the matching `.sha256`
 file, extract it, and move `smolbren` to a directory on your `PATH`.

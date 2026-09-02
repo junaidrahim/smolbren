@@ -2,12 +2,18 @@ name: CI
 
 on:
   pull_request:
+  # GitHub evicts caches that are not accessed for seven days. Refresh the
+  # default-branch cache often enough that the first PR after a quiet week is
+  # not forced to rebuild the full Lance/DataFusion dependency graph.
+  schedule:
+    - cron: "17 3 * * 1,4"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -18,13 +24,18 @@ jobs:
     name: Rust tests and lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          # PR jobs restore the cache produced by release.yml's identically
+          # named test job, but do not save branch-scoped copies that compete
+          # with it for the repository's cache quota.
+          save-if: ${{ github.event_name != 'pull_request' }}
       - name: Run tests
         run: cargo test --locked --all-targets
       - name: Run Clippy
@@ -34,15 +45,17 @@ jobs:
           bash -n scripts/generate-homebrew-formula.sh
           test_dir=$(mktemp -d)
           trap 'rm -rf "$test_dir"' EXIT
+          mkdir -p "$test_dir/Formula"
           for target in \
             aarch64-apple-darwin \
-            x86_64-apple-darwin \
             aarch64-unknown-linux-gnu \
             x86_64-unknown-linux-gnu
           do
             printf '%s\n' "$target" > "$test_dir/smolbren-v1.2.3-$target.tar.gz"
           done
           scripts/generate-homebrew-formula.sh \
-            1.2.3 junaidrahim/smolbren "$test_dir" "$test_dir/smolbren.rb"
-          ruby -c "$test_dir/smolbren.rb"
-          grep -F 'version "1.2.3"' "$test_dir/smolbren.rb"
+            1.2.3 junaidrahim/smolbren "$test_dir" "$test_dir/Formula/smolbren.rb"
+          ruby -c "$test_dir/Formula/smolbren.rb"
+          eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+          brew style "$test_dir/Formula/smolbren.rb"
+          grep -F 'version "1.2.3"' "$test_dir/Formula/smolbren.rb"
