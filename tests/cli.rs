@@ -178,6 +178,21 @@ fn end_to_end_readonly() {
     );
     assert_eq!(result["rows"].as_array().unwrap().len(), 2);
 
+    // Anonymous nodes use the same catch-all note dataset, both alone and at
+    // either end of typed or anonymous relationships.
+    let result = run_json(&config, &["query", "MATCH (n) RETURN count(n)"]);
+    assert_eq!(result["rows"][0]["count(n)"], 9);
+    let result = run_json(
+        &config,
+        &["query", "MATCH (a)-[:mentions]->(b) RETURN count(b)"],
+    );
+    assert_eq!(result["rows"][0]["count(b)"], 6);
+    let result = run_json(
+        &config,
+        &["query", "MATCH (a)-[r]->(b) RETURN count(b)"],
+    );
+    assert_eq!(result["rows"][0]["count(b)"], 15);
+
     // Scalar frontmatter is queryable, including ISO date ranges.
     let result = run_json(
         &config,

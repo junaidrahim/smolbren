@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cypher queries can now scan anonymous nodes and traverse anonymous
+  relationships across the full vault graph ([#9](https://github.com/junaidrahim/smolbren/issues/9)).
+
 ## [0.1.4](https://github.com/junaidrahim/smolbren/compare/v0.1.3...v0.1.4) - 2026-08-11
 
 ### Added
