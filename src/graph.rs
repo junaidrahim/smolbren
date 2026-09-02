@@ -7,6 +7,7 @@ use arrow_array::{
     ArrayRef, BooleanArray, Float64Array, Int64Array, RecordBatch, StringArray,
 };
 use arrow_schema::{DataType, Field, Schema};
+use lance_graph::ast::{CypherQuery as CypherAst, GraphPattern, ReadingClause};
 use lance_graph::{CypherQuery, GraphConfig, NodeMapping, RelationshipMapping};
 
 use crate::error::{Result, SmolbrenError};
@@ -17,6 +18,7 @@ use crate::vault::Vault;
 
 const NOTE_PROPERTIES: [&str; 3] = ["path", "type", "title"];
 const EDGE_PROPERTIES: [&str; 3] = ["to_raw", "resolved", "position"];
+const ALL_RELATIONSHIPS_TYPE: &str = "__SmolbrenAllRelationships";
 
 /// Run a Cypher query over the vault's note graph.
 ///
@@ -32,10 +34,29 @@ pub async fn run_query(
     params: &[(String, String)],
 ) -> Result<serde_json::Value> {
     let ontology = Ontology::load(&vault.ontology_path()).map_err(SmolbrenError::Other)?;
-    let query = CypherQuery::new(cypher)
+    let parsed_query = CypherQuery::new(cypher)
         .map_err(|e| SmolbrenError::Other(anyhow::anyhow!("cypher parse error: {e}")))?;
+    // lance-graph 0.5.4 defaults anonymous nodes to `Node`, but does not give
+    // anonymous relationships a corresponding default type. Add an internal
+    // catch-all type so patterns such as (a)-[r]->(b) traverse every edge.
+    let anonymous_relationships = anonymous_relationship_count(parsed_query.ast());
+    let query = if anonymous_relationships == 0 {
+        parsed_query
+    } else {
+        let rewritten = label_anonymous_relationships(cypher, anonymous_relationships)
+            .map_err(SmolbrenError::Other)?;
+        CypherQuery::new(&rewritten).map_err(|e| {
+            SmolbrenError::Other(anyhow::anyhow!(
+                "cypher parse error after expanding anonymous relationships: {e}"
+            ))
+        })?
+    };
     let node_labels = query.referenced_node_labels();
     let rel_types = query.referenced_relationship_types();
+    let uses_all_relationships = anonymous_relationships > 0
+        || rel_types
+            .iter()
+            .any(|rel| rel.eq_ignore_ascii_case(ALL_RELATIONSHIPS_TYPE));
 
     // Scalar frontmatter is promoted into typed in-memory Arrow columns for
     // graph execution. The persisted JSON remains the source of truth, so new
@@ -62,7 +83,10 @@ pub async fn run_query(
         .keys()
         .map(String::as_str)
         .chain(node_labels.iter().map(String::as_str))
-        .chain(["Note"])
+        // lance-graph plans unlabeled node patterns as the reserved `Node`
+        // label. Keep smolbren's public `Note` catch-all and register `Node`
+        // as an internal alias for the same dataset.
+        .chain(["Note", "Node"])
     {
         if seen_labels.iter().any(|l| l.eq_ignore_ascii_case(label)) {
             continue;
@@ -89,6 +113,16 @@ pub async fn run_query(
                 .with_properties(EDGE_PROPERTIES.iter().map(|s| s.to_string()).collect()),
         );
     }
+    if anonymous_relationships > 0
+        && !seen_rels
+            .iter()
+            .any(|rel| rel.eq_ignore_ascii_case(ALL_RELATIONSHIPS_TYPE))
+    {
+        builder = builder.with_relationship_mapping(
+            RelationshipMapping::new(ALL_RELATIONSHIPS_TYPE, "from_id", "to_id")
+                .with_properties(EDGE_PROPERTIES.iter().map(|s| s.to_string()).collect()),
+        );
+    }
     let config = builder
         .build()
         .map_err(|e| SmolbrenError::Other(anyhow::anyhow!("graph config: {e}")))?;
@@ -106,6 +140,9 @@ pub async fn run_query(
 
     let mut datasets: HashMap<String, RecordBatch> = HashMap::new();
     for label in &node_labels {
+        if label.eq_ignore_ascii_case("node") {
+            continue;
+        }
         let batch = if label.eq_ignore_ascii_case("note") {
             notes.clone()
         } else {
@@ -114,8 +151,17 @@ pub async fn run_query(
         datasets.insert(label.clone(), batch);
     }
     for rel in &rel_types {
-        datasets.insert(rel.clone(), filter_eq(&edges, "edge_type", rel)?);
+        if !rel.eq_ignore_ascii_case(ALL_RELATIONSHIPS_TYPE) {
+            datasets.insert(rel.clone(), filter_eq(&edges, "edge_type", rel)?);
+        }
     }
+    if uses_all_relationships {
+        datasets.insert(ALL_RELATIONSHIPS_TYPE.to_string(), edges.clone());
+    }
+    // `referenced_node_labels` only returns explicit labels. Anonymous node
+    // patterns therefore need the catch-all dataset registered separately,
+    // including when other node labels or relationship types are present.
+    datasets.insert("Node".to_string(), notes.clone());
 
     let mut param_map: HashMap<String, serde_json::Value> = HashMap::new();
     for (k, v) in params {
@@ -138,6 +184,106 @@ pub async fn run_query(
         .collect();
     let rows = output::batch_to_rows(&result)?;
     Ok(serde_json::json!({"columns": columns, "rows": rows}))
+}
+
+fn anonymous_relationship_count(ast: &CypherAst) -> usize {
+    ast.reading_clauses
+        .iter()
+        .chain(&ast.post_with_reading_clauses)
+        .filter_map(|clause| match clause {
+            ReadingClause::Match(match_clause) => Some(&match_clause.patterns),
+            ReadingClause::Unwind(_) => None,
+        })
+        .flatten()
+        .map(|pattern| match pattern {
+            GraphPattern::Node(_) => 0,
+            GraphPattern::Path(path) => path
+                .segments
+                .iter()
+                .filter(|segment| segment.relationship.types.is_empty())
+                .count(),
+        })
+        .sum()
+}
+
+/// Give anonymous relationship patterns the internal catch-all type expected
+/// by smolbren's graph configuration. The input has already been parsed, so
+/// relationship syntax is known to be `-[...]->`, `<-[...]-`, or `-[...]-`.
+fn label_anonymous_relationships(cypher: &str, expected: usize) -> anyhow::Result<String> {
+    let bytes = cypher.as_bytes();
+    let mut insertions = Vec::with_capacity(expected);
+    let mut quote = None;
+    let mut index = 0;
+
+    while index < bytes.len() && insertions.len() < expected {
+        match quote {
+            Some(delimiter) if bytes[index] == delimiter => quote = None,
+            Some(_) => {}
+            None if matches!(bytes[index], b'\'' | b'"') => quote = Some(bytes[index]),
+            None if bytes[index] == b'[' && index > 0 && bytes[index - 1] == b'-' => {
+                let mut close = index + 1;
+                let mut inner_quote = None;
+                while close < bytes.len() {
+                    match inner_quote {
+                        Some(delimiter) if bytes[close] == delimiter => inner_quote = None,
+                        Some(_) => {}
+                        None if matches!(bytes[close], b'\'' | b'"') => {
+                            inner_quote = Some(bytes[close]);
+                        }
+                        None if bytes[close] == b']' => break,
+                        None => {}
+                    }
+                    close += 1;
+                }
+
+                if close < bytes.len()
+                    && bytes.get(close + 1) == Some(&b'-')
+                {
+                    let mut content = index + 1;
+                    while content < close {
+                        let character = cypher[content..close].chars().next().unwrap();
+                        if !character.is_whitespace() {
+                            break;
+                        }
+                        content += character.len_utf8();
+                    }
+                    while content < close {
+                        let character = cypher[content..close].chars().next().unwrap();
+                        if !(character.is_alphanumeric() || character == '_') {
+                            break;
+                        }
+                        content += character.len_utf8();
+                    }
+                    if bytes.get(content) != Some(&b':') {
+                        insertions.push(content);
+                    }
+                    index = close;
+                }
+            }
+            None => {}
+        }
+        index += 1;
+    }
+
+    if insertions.len() != expected {
+        anyhow::bail!(
+            "could not identify all anonymous relationships in parsed Cypher query (expected {expected}, found {})",
+            insertions.len()
+        );
+    }
+
+    let mut rewritten = String::with_capacity(
+        cypher.len() + insertions.len() * (ALL_RELATIONSHIPS_TYPE.len() + 1),
+    );
+    let mut copied = 0;
+    for insertion in insertions {
+        rewritten.push_str(&cypher[copied..insertion]);
+        rewritten.push(':');
+        rewritten.push_str(ALL_RELATIONSHIPS_TYPE);
+        copied = insertion;
+    }
+    rewritten.push_str(&cypher[copied..]);
+    Ok(rewritten)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -284,6 +430,32 @@ fn filter_eq(batch: &RecordBatch, column: &str, value: &str) -> Result<RecordBat
 mod tests {
     use super::*;
     use arrow_array::StringArray;
+
+    #[test]
+    fn anonymous_relationships_receive_the_internal_catch_all_type() {
+        let cypher = "MATCH (a)-[r]->(b), (b)<-[]-(c), (c)-[:typed]->(d) RETURN count(d)";
+        let parsed = CypherQuery::new(cypher).unwrap();
+        let count = anonymous_relationship_count(parsed.ast());
+        assert_eq!(count, 2);
+        assert_eq!(
+            label_anonymous_relationships(cypher, count).unwrap(),
+            format!(
+                "MATCH (a)-[r:{0}]->(b), (b)<-[:{0}]-(c), (c)-[:typed]->(d) RETURN count(d)",
+                ALL_RELATIONSHIPS_TYPE
+            )
+        );
+    }
+
+    #[test]
+    fn anonymous_relationship_rewrite_handles_properties_and_quoted_brackets() {
+        let cypher = "MATCH (a)-[rélation {note: 'keep ] intact'}]->(b) RETURN b";
+        assert_eq!(
+            label_anonymous_relationships(cypher, 1).unwrap(),
+            format!(
+                "MATCH (a)-[rélation:{ALL_RELATIONSHIPS_TYPE} {{note: 'keep ] intact'}}]->(b) RETURN b"
+            )
+        );
+    }
 
     #[test]
     fn frontmatter_scalars_become_typed_columns() {
