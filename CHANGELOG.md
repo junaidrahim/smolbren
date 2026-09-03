@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6](https://github.com/junaidrahim/smolbren/compare/v0.1.5...v0.1.6) - 2026-09-03
+
+### Fixed
+
+- *(ci)* repair release builds and cache reuse ([#13](https://github.com/junaidrahim/smolbren/pull/13))
+
 ## [0.1.5](https://github.com/junaidrahim/smolbren/compare/v0.1.4...v0.1.5) - 2026-09-02
 
 ### Fixed
