@@ -24,7 +24,6 @@ checksum() {
 }
 
 macos_arm_sha="$(checksum aarch64-apple-darwin)"
-macos_intel_sha="$(checksum x86_64-apple-darwin)"
 linux_arm_sha="$(checksum aarch64-unknown-linux-gnu)"
 linux_intel_sha="$(checksum x86_64-unknown-linux-gnu)"
 
@@ -42,20 +41,19 @@ class Smolbren < Formula
   license "MIT"
 
   on_macos do
-    if Hardware::CPU.arm?
+    depends_on arch: :arm64
+    on_arm do
       url "https://github.com/${repository}/releases/download/${tag}/smolbren-${tag}-aarch64-apple-darwin.tar.gz"
       sha256 "${macos_arm_sha}"
-    else
-      url "https://github.com/${repository}/releases/download/${tag}/smolbren-${tag}-x86_64-apple-darwin.tar.gz"
-      sha256 "${macos_intel_sha}"
     end
   end
 
   on_linux do
-    if Hardware::CPU.arm?
+    on_arm do
       url "https://github.com/${repository}/releases/download/${tag}/smolbren-${tag}-aarch64-unknown-linux-gnu.tar.gz"
       sha256 "${linux_arm_sha}"
-    else
+    end
+    on_intel do
       url "https://github.com/${repository}/releases/download/${tag}/smolbren-${tag}-x86_64-unknown-linux-gnu.tar.gz"
       sha256 "${linux_intel_sha}"
     end

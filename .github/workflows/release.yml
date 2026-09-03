@@ -14,12 +14,12 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --all-targets
+      - run: cargo test --locked --all-targets
 
   release:
     needs: test
@@ -31,14 +31,13 @@ jobs:
     # never let two pushes race a release
     concurrency: crates-publish
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # release-plz needs full history and tags to compute the next version
           fetch-depth: 0
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - name: Install release-plz
         uses: taiki-e/install-action@v2
         with:
@@ -91,7 +90,6 @@ jobs:
           package=false
           for target in \
             aarch64-apple-darwin \
-            x86_64-apple-darwin \
             aarch64-unknown-linux-gnu \
             x86_64-unknown-linux-gnu
           do
@@ -115,16 +113,14 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            runner: ubuntu-22.04
+            runner: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
-            runner: ubuntu-22.04-arm
-          - target: x86_64-apple-darwin
-            runner: macos-15-intel
+            runner: ubuntu-24.04-arm
           - target: aarch64-apple-darwin
             runner: macos-15
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release.outputs.tag }}
       - name: Install protoc on Linux
@@ -151,7 +147,7 @@ jobs:
           cp target/release/smolbren README.md LICENSE "$package_dir/"
           tar -czf "$archive" -C "$package_dir" smolbren README.md LICENSE
           shasum -a 256 "$archive" > "$archive.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: smolbren-${{ matrix.target }}
           path: |
@@ -164,10 +160,10 @@ jobs:
     needs: [release, package-binaries]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release.outputs.tag }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: smolbren-*
@@ -178,7 +174,7 @@ jobs:
           TAG: ${{ needs.release.outputs.tag }}
         run: gh release upload "$TAG" dist/* --clobber
       - name: Check out the Homebrew tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: junaidrahim/homebrew-tap
           ssh-key: ${{ secrets.HOMEBREW_TAP_SSH_KEY }}
