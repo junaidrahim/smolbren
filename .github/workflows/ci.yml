@@ -32,6 +32,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
+      # rust-cache hashes every installed toolchain. Remove the runner's
+      # moving stable alias so only the pinned compiler contributes to the key.
+      - name: Remove unpinned Rust toolchain
+        run: rustup toolchain uninstall stable
       - uses: Swatinem/rust-cache@v2
         with:
           # PR jobs restore the cache produced by release.yml's identically

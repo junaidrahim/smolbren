@@ -18,6 +18,8 @@ jobs:
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - uses: dtolnay/rust-toolchain@1.98.1
+      - name: Remove unpinned Rust toolchain
+        run: rustup toolchain uninstall stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked --all-targets
 
@@ -130,6 +132,8 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install protobuf
       - uses: dtolnay/rust-toolchain@1.98.1
+      - name: Remove unpinned Rust toolchain
+        run: rustup toolchain uninstall stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
