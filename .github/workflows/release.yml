@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --locked --all-targets
 
@@ -37,7 +37,7 @@ jobs:
           fetch-depth: 0
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
       - name: Install release-plz
         uses: taiki-e/install-action@v2
         with:
@@ -129,7 +129,7 @@ jobs:
       - name: Install protoc on macOS
         if: runner.os == 'macOS'
         run: brew install protobuf
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.98.1
       - uses: Swatinem/rust-cache@v2
         with:
           key: release-${{ matrix.target }}
