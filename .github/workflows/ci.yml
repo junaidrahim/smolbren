@@ -27,9 +27,15 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - uses: dtolnay/rust-toolchain@stable
+      # Pin patch releases so an upstream stable update does not invalidate the
+      # large dependency cache between otherwise identical runs.
+      - uses: dtolnay/rust-toolchain@1.98.1
         with:
           components: clippy
+      # rust-cache hashes every installed toolchain. Remove the runner's
+      # moving stable alias so only the pinned compiler contributes to the key.
+      - name: Remove unpinned Rust toolchain
+        run: rustup toolchain uninstall stable
       - uses: Swatinem/rust-cache@v2
         with:
           # PR jobs restore the cache produced by release.yml's identically
